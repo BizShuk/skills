@@ -128,7 +128,7 @@ function createGitClient(extraEnv?: NodeJS.ProcessEnv) {
       'filter.lfs.clean=',
       'filter.lfs.process=',
     ],
-  });
+  } as any);
 }
 
 async function resetTempDir(dir: string): Promise<void> {

@@ -14,6 +14,7 @@ export interface SearchItem<T> {
   value: T;
   label: string;
   hint?: string;
+  group?: string;
 }
 
 export interface LockedSection<T> {
@@ -44,6 +45,37 @@ const S_BAR = pc.dim('│');
 const S_BAR_H = pc.dim('─');
 
 export const cancelSymbol = Symbol('cancel');
+
+const S_RADIO_PARTIAL = pc.green('◒');
+
+export interface DisplayRow<T> {
+  type: 'group' | 'item';
+  groupName: string;
+  item?: SearchItem<T>;
+}
+
+export function buildDisplayRows<T>(filteredItems: SearchItem<T>[]): DisplayRow<T>[] {
+  const rows: DisplayRow<T>[] = [];
+  let lastGroup: string | undefined = undefined;
+
+  for (const item of filteredItems) {
+    if (item.group !== undefined) {
+      if (item.group !== lastGroup) {
+        rows.push({
+          type: 'group',
+          groupName: item.group,
+        });
+        lastGroup = item.group;
+      }
+    }
+    rows.push({
+      type: 'item',
+      groupName: item.group || '',
+      item,
+    });
+  }
+  return rows;
+}
 
 /**
  * Approximate terminal display width (cells) for a string with no ANSI sequences.
@@ -138,7 +170,7 @@ export async function searchMultiselect<T>(
   const {
     message,
     items,
-    maxVisible = 8,
+    maxVisible = 12,
     initialSelected = [],
     required = false,
     lockedSection,
@@ -170,12 +202,17 @@ export async function searchMultiselect<T>(
       const lowerQ = q.toLowerCase();
       return (
         item.label.toLowerCase().includes(lowerQ) ||
-        String(item.value).toLowerCase().includes(lowerQ)
+        String(item.value).toLowerCase().includes(lowerQ) ||
+        (item.group !== undefined && item.group.toLowerCase().includes(lowerQ))
       );
     };
 
     const getFiltered = (): SearchItem<T>[] => {
       return items.filter((item) => filter(item, query));
+    };
+
+    const getDisplayRows = (filteredItems: SearchItem<T>[]): DisplayRow<T>[] => {
+      return buildDisplayRows(filteredItems);
     };
 
     const clearRender = (): void => {
@@ -194,6 +231,7 @@ export async function searchMultiselect<T>(
 
       const lines: string[] = [];
       const filtered = getFiltered();
+      const rows = getDisplayRows(filtered);
 
       // Header
       const icon =
@@ -226,34 +264,58 @@ export async function searchMultiselect<T>(
         lines.push(`${S_BAR}  ${pc.dim('↑↓ move, space select, enter confirm')}`);
         lines.push(`${S_BAR}`);
 
-        // Items
+        // Items (using sliding window over display rows)
         const visibleStart = Math.max(
           0,
-          Math.min(cursor - Math.floor(maxVisible / 2), filtered.length - maxVisible)
+          Math.min(cursor - Math.floor(maxVisible / 2), rows.length - maxVisible)
         );
-        const visibleEnd = Math.min(filtered.length, visibleStart + maxVisible);
-        const visibleItems = filtered.slice(visibleStart, visibleEnd);
+        const visibleEnd = Math.min(rows.length, visibleStart + maxVisible);
+        const visibleRows = rows.slice(visibleStart, visibleEnd);
 
-        if (filtered.length === 0) {
+        if (rows.length === 0) {
           lines.push(`${S_BAR}  ${pc.dim('No matches found')}`);
         } else {
-          for (let i = 0; i < visibleItems.length; i++) {
-            const item = visibleItems[i]!;
+          for (let i = 0; i < visibleRows.length; i++) {
+            const row = visibleRows[i]!;
             const actualIndex = visibleStart + i;
-            const isSelected = selected.has(item.value);
             const isCursor = actualIndex === cursor;
 
-            const radio = isSelected ? S_RADIO_ACTIVE : S_RADIO_INACTIVE;
-            const label = isCursor ? pc.underline(item.label) : item.label;
-            const hint = item.hint ? pc.dim(` (${item.hint})`) : '';
+            if (row.type === 'group') {
+              const prefix = isCursor ? pc.cyan('❯') : ' ';
 
-            const prefix = isCursor ? pc.cyan('❯') : ' ';
-            lines.push(`${S_BAR} ${prefix} ${radio} ${label}${hint}`);
+              // Find selection state of group items (in the filtered list belonging to this group)
+              const groupItems = filtered.filter((it) => it.group === row.groupName);
+              const selectedGroupItems = groupItems.filter((it) => selected.has(it.value));
+              const isAllSelected =
+                selectedGroupItems.length === groupItems.length && groupItems.length > 0;
+              const isAnySelected = selectedGroupItems.length > 0;
+              const radio = isAllSelected
+                ? S_RADIO_ACTIVE
+                : isAnySelected
+                  ? S_RADIO_PARTIAL
+                  : S_RADIO_INACTIVE;
+
+              const groupLabel = isCursor
+                ? pc.underline(pc.bold(pc.cyan(row.groupName)))
+                : pc.bold(pc.cyan(row.groupName));
+
+              lines.push(`${S_BAR} ${prefix} ${radio} ${groupLabel}`);
+            } else {
+              const isSelected = selected.has(row.item!.value);
+              const radio = isSelected ? S_RADIO_ACTIVE : S_RADIO_INACTIVE;
+              const label = isCursor ? pc.underline(row.item!.label) : row.item!.label;
+              const hint = row.item!.hint ? pc.dim(` (${row.item!.hint})`) : '';
+
+              const prefix = isCursor ? pc.cyan('❯') : ' ';
+              // Indent items under group headers
+              const indent = row.item!.group !== undefined ? '    ' : '  ';
+              lines.push(`${S_BAR} ${indent}${prefix} ${radio} ${label}${hint}`);
+            }
           }
 
-          // Show count if more items
+          // Show count if more rows
           const hiddenBefore = visibleStart;
-          const hiddenAfter = filtered.length - visibleEnd;
+          const hiddenAfter = rows.length - visibleEnd;
           if (hiddenBefore > 0 || hiddenAfter > 0) {
             const parts: string[] = [];
             if (hiddenBefore > 0) parts.push(`↑ ${hiddenBefore} more`);
@@ -291,9 +353,6 @@ export async function searchMultiselect<T>(
       }
 
       process.stdout.write(lines.join('\n') + '\n');
-      // Use wrapped row count: logical lines can span multiple terminal rows when hints
-      // or labels exceed column width. Using lines.length alone under-counts and breaks
-      // clearRender(), causing the prompt to re-print hundreds of times on each redraw.
       lastRenderHeight = countVisualRowsForLines(lines, process.stdout.columns);
     };
 
@@ -327,6 +386,7 @@ export async function searchMultiselect<T>(
       if (!key) return;
 
       const filtered = getFiltered();
+      const rows = getDisplayRows(filtered);
 
       if (key.name === 'return') {
         submit();
@@ -345,18 +405,37 @@ export async function searchMultiselect<T>(
       }
 
       if (key.name === 'down') {
-        cursor = Math.min(filtered.length - 1, cursor + 1);
+        cursor = Math.min(rows.length - 1, cursor + 1);
         render();
         return;
       }
 
       if (key.name === 'space') {
-        const item = filtered[cursor];
-        if (item) {
-          if (selected.has(item.value)) {
-            selected.delete(item.value);
+        const row = rows[cursor];
+        if (row) {
+          if (row.type === 'group') {
+            // Find all items under this group (in the filtered list)
+            const groupItems = filtered.filter((it) => it.group === row.groupName);
+            const selectedGroupItems = groupItems.filter((it) => selected.has(it.value));
+
+            if (selectedGroupItems.length === groupItems.length) {
+              // Deselect all matching items in this group
+              for (const it of groupItems) {
+                selected.delete(it.value);
+              }
+            } else {
+              // Select all matching items in this group
+              for (const it of groupItems) {
+                selected.add(it.value);
+              }
+            }
           } else {
-            selected.add(item.value);
+            const item = row.item!;
+            if (selected.has(item.value)) {
+              selected.delete(item.value);
+            } else {
+              selected.add(item.value);
+            }
           }
         }
         render();

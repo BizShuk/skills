@@ -632,13 +632,13 @@ async function handleWellKnownSkills(
       hint: s.description.length > 60 ? s.description.slice(0, 57) + '...' : s.description,
     }));
 
-    const selected = await multiselect({
+    const selected = await searchMultiselect({
       message: 'Select skills to install',
-      options: skillChoices,
+      items: skillChoices,
       required: true,
     });
 
-    if (p.isCancel(selected)) {
+    if (isCancelled(selected)) {
       p.cancel('Installation cancelled');
       process.exit(0);
     }
@@ -1281,50 +1281,26 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         return getSkillDisplayName(a).localeCompare(getSkillDisplayName(b));
       });
 
-      // Check if any skills have plugin grouping
-      const hasGroups = sortedSkills.some((s) => s.pluginName);
+      const kebabToTitle = (s: string) =>
+        s
+          .split('-')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
 
-      let selected: Skill[] | symbol;
+      const skillChoices = sortedSkills.map((s) => ({
+        value: s,
+        label: getSkillDisplayName(s),
+        hint: s.description.length > 60 ? s.description.slice(0, 57) + '...' : s.description,
+        group: s.pluginName ? kebabToTitle(s.pluginName) : undefined,
+      }));
 
-      if (hasGroups) {
-        // Build grouped options for groupMultiselect
-        const kebabToTitle = (s: string) =>
-          s
-            .split('-')
-            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-            .join(' ');
+      const selected = await searchMultiselect({
+        message: 'Select skills to install',
+        items: skillChoices,
+        required: true,
+      });
 
-        const grouped: Record<string, p.Option<Skill>[]> = {};
-        for (const s of sortedSkills) {
-          const groupName = s.pluginName ? kebabToTitle(s.pluginName) : 'Other';
-          if (!grouped[groupName]) grouped[groupName] = [];
-          grouped[groupName]!.push({
-            value: s,
-            label: getSkillDisplayName(s),
-            hint: s.description.length > 60 ? s.description.slice(0, 57) + '...' : s.description,
-          });
-        }
-
-        selected = await p.groupMultiselect({
-          message: `Select skills to install ${pc.dim('(space to toggle)')}`,
-          options: grouped,
-          required: true,
-        });
-      } else {
-        const skillChoices = sortedSkills.map((s) => ({
-          value: s,
-          label: getSkillDisplayName(s),
-          hint: s.description.length > 60 ? s.description.slice(0, 57) + '...' : s.description,
-        }));
-
-        selected = await multiselect({
-          message: 'Select skills to install',
-          options: skillChoices,
-          required: true,
-        });
-      }
-
-      if (p.isCancel(selected)) {
+      if (isCancelled(selected)) {
         p.cancel('Installation cancelled');
         await cleanup(tempDir);
         process.exit(0);

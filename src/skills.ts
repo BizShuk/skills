@@ -81,7 +81,8 @@ export async function parseSkillMd(
     // Skip internal skills unless:
     // 1. INSTALL_INTERNAL_SKILLS=1 is set, OR
     // 2. includeInternal option is true (e.g., when user explicitly requests a skill)
-    const isInternal = data.metadata?.internal === true;
+    const metadata = data.metadata as Record<string, unknown> | undefined;
+    const isInternal = metadata?.internal === true;
     if (isInternal && !shouldInstallInternalSkills() && !options?.includeInternal) {
       return null;
     }
@@ -91,7 +92,7 @@ export async function parseSkillMd(
       description: sanitizeMetadata(data.description),
       path: dirname(skillMdPath),
       rawContent: content,
-      metadata: data.metadata,
+      metadata,
     };
   } catch {
     return null;
@@ -224,7 +225,13 @@ export async function discoverSkills(
   const deepContainerDirs = new Set(prioritySearchDirs.slice(1));
 
   // Add skill paths declared in plugin manifests
-  prioritySearchDirs.push(...(await getPluginSkillPaths(searchPath)));
+  const pluginSkillPaths = await getPluginSkillPaths(searchPath);
+  prioritySearchDirs.push(...pluginSkillPaths);
+  for (const dir of pluginSkillPaths) {
+    if (dir.endsWith('/skills') || dir.endsWith('\\skills')) {
+      deepContainerDirs.add(dir);
+    }
+  }
 
   const tryAddSkillAt = async (skillDir: string): Promise<boolean> => {
     if (!(await hasSkillMd(skillDir))) return false;

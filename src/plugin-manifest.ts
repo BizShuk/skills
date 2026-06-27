@@ -1,4 +1,4 @@
-import { readFile } from 'fs/promises';
+import { readFile, readdir, stat } from 'fs/promises';
 import { join, dirname, resolve, normalize, sep } from 'path';
 
 /**
@@ -111,6 +111,15 @@ export async function getPluginSkillPaths(basePath: string): Promise<string[]> {
   return searchDirs;
 }
 
+async function hasSkillMd(dir: string): Promise<boolean> {
+  try {
+    const s = await stat(join(dir, 'SKILL.md'));
+    return s.isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Get a map of skill directory paths to plugin names from plugin manifests.
  * This allows grouping skills by their parent plugin.
@@ -156,6 +165,32 @@ export async function getPluginGroupings(basePath: string): Promise<Map<string, 
             }
           }
         }
+
+        // Map conventional skills under the plugin's skills/ directory
+        const conventionalSkillsDir = join(pluginBase, 'skills');
+        try {
+          const entries = await readdir(conventionalSkillsDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory()) {
+              const skillDir = join(conventionalSkillsDir, entry.name);
+              if (await hasSkillMd(skillDir)) {
+                groupings.set(resolve(skillDir), plugin.name);
+              } else {
+                try {
+                  const subEntries = await readdir(skillDir, { withFileTypes: true });
+                  for (const subEntry of subEntries) {
+                    if (subEntry.isDirectory()) {
+                      const subSkillDir = join(skillDir, subEntry.name);
+                      if (await hasSkillMd(subSkillDir)) {
+                        groupings.set(resolve(subSkillDir), plugin.name);
+                      }
+                    }
+                  }
+                } catch {}
+              }
+            }
+          }
+        } catch {}
       }
     }
   } catch {
@@ -166,14 +201,42 @@ export async function getPluginGroupings(basePath: string): Promise<Map<string, 
   try {
     const content = await readFile(join(basePath, '.claude-plugin/plugin.json'), 'utf-8');
     const manifest: PluginManifest = JSON.parse(content);
-    if (manifest.name && manifest.skills && manifest.skills.length > 0) {
-      for (const skillPath of manifest.skills) {
-        if (!isValidRelativePath(skillPath)) continue;
-        const skillDir = join(basePath, skillPath);
-        if (isContainedIn(skillDir, basePath)) {
-          groupings.set(resolve(skillDir), manifest.name);
+    if (manifest.name) {
+      if (manifest.skills && manifest.skills.length > 0) {
+        for (const skillPath of manifest.skills) {
+          if (!isValidRelativePath(skillPath)) continue;
+          const skillDir = join(basePath, skillPath);
+          if (isContainedIn(skillDir, basePath)) {
+            groupings.set(resolve(skillDir), manifest.name);
+          }
         }
       }
+
+      // Map conventional skills under the plugin's skills/ directory
+      const conventionalSkillsDir = join(basePath, 'skills');
+      try {
+        const entries = await readdir(conventionalSkillsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            const skillDir = join(conventionalSkillsDir, entry.name);
+            if (await hasSkillMd(skillDir)) {
+              groupings.set(resolve(skillDir), manifest.name);
+            } else {
+              try {
+                const subEntries = await readdir(skillDir, { withFileTypes: true });
+                for (const subEntry of subEntries) {
+                  if (subEntry.isDirectory()) {
+                    const subSkillDir = join(skillDir, subEntry.name);
+                    if (await hasSkillMd(subSkillDir)) {
+                      groupings.set(resolve(subSkillDir), manifest.name);
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+        }
+      } catch {}
     }
   } catch {
     // File doesn't exist or invalid JSON

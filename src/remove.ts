@@ -7,6 +7,7 @@ import { track } from './telemetry.ts';
 import { detectAgent } from './detect-agent.ts';
 import { removeSkillFromLock, getSkillFromLock } from './skill-lock.ts';
 import type { AgentType } from './types.ts';
+import { searchMultiselect, cancelSymbol } from './prompts/search-multiselect.ts';
 import {
   getInstallPath,
   getCanonicalPath,
@@ -114,13 +115,13 @@ export async function removeCommand(skillNames: string[], options: RemoveOptions
       label: s,
     }));
 
-    const selected = await p.multiselect({
-      message: `Select skills to remove ${pc.dim('(space to toggle)')}`,
-      options: choices,
+    const selected = await searchMultiselect({
+      message: 'Select skills to remove',
+      items: choices,
       required: true,
     });
 
-    if (p.isCancel(selected)) {
+    if (selected === cancelSymbol) {
       p.cancel('Removal cancelled');
       process.exit(0);
     }

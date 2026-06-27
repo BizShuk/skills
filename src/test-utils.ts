@@ -27,12 +27,25 @@ export function runCli(
   env?: Record<string, string>,
   timeout?: number
 ): { stdout: string; stderr: string; exitCode: number } {
+  const cleanEnv = { ...process.env };
+  for (const key of Object.keys(cleanEnv)) {
+    if (
+      key.startsWith('ANTIGRAVITY') ||
+      key === 'CLAUDE_CODE' ||
+      key === 'GEMINI_API_KEY' ||
+      key === 'CLINE' ||
+      key.includes('AGENT')
+    ) {
+      delete cleanEnv[key];
+    }
+  }
+
   try {
     const output = execSync(`node "${CLI_PATH}" ${args.join(' ')}`, {
       encoding: 'utf-8',
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: env ? { ...process.env, ...env } : undefined,
+      env: env ? { ...cleanEnv, ...env } : cleanEnv,
       timeout: timeout ?? 30000,
     });
     return { stdout: stripAnsi(output), stderr: '', exitCode: 0 };
@@ -55,12 +68,26 @@ export function runCliWithInput(
   input: string,
   cwd?: string
 ): { stdout: string; stderr: string; exitCode: number } {
+  const cleanEnv = { ...process.env };
+  for (const key of Object.keys(cleanEnv)) {
+    if (
+      key.startsWith('ANTIGRAVITY') ||
+      key === 'CLAUDE_CODE' ||
+      key === 'GEMINI_API_KEY' ||
+      key === 'CLINE' ||
+      key.includes('AGENT')
+    ) {
+      delete cleanEnv[key];
+    }
+  }
+
   try {
     const output = execSync(`node "${CLI_PATH}" ${args.join(' ')}`, {
       encoding: 'utf-8',
       cwd,
       input: input + '\n',
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: cleanEnv,
     });
     return { stdout: stripAnsi(output), stderr: '', exitCode: 0 };
   } catch (error: any) {
