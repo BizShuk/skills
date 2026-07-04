@@ -34,6 +34,7 @@ export function getLockSource(parsedUrl: string, normalizedSource: string | null
 }
 import { cloneRepo, cleanupTempDir, GitCloneError } from './git.ts';
 import { discoverSkills, getSkillDisplayName, filterSkills } from './skills.ts';
+import { getMarketplaceRemotePlugins } from './plugin-manifest.ts';
 import {
   installSkillForAgent,
   installBlobSkillForAgent,
@@ -1127,6 +1128,33 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         includeInternal,
         fullDepth: options.fullDepth,
       });
+
+      // Also surface skills declared by remote-source (e.g. github) plugins
+      // in the local marketplace.json. These cannot be discovered on disk
+      // — they must be fetched via the blob path. Failures are non-fatal:
+      // local skills remain selectable even if a remote plugin is unreachable.
+      const remotePlugins = await getMarketplaceRemotePlugins(parsed.localPath!);
+      for (const remote of remotePlugins) {
+        try {
+          const remoteResult = await tryMarketplaceBlobInstall(remote.ownerRepo, {
+            ref: remote.ref,
+            getToken: getGitHubToken,
+            includeInternal,
+          });
+          if (!remoteResult) continue;
+          // Tag skills with the marketplace's plugin name so display grouping
+          // reflects where the user discovered them, not just the upstream
+          // marketplace's name (which could be empty for well-known blobs).
+          for (const remoteSkill of remoteResult.skills) {
+            if (!remoteSkill.pluginName) {
+              remoteSkill.pluginName = remote.pluginName;
+            }
+          }
+          skills.push(...remoteResult.skills);
+        } catch {
+          // Skip unreachable remote — local skills still installable
+        }
+      }
     } else if (parsed.type === 'github' && !options.fullDepth) {
       // Three-step blob discovery (each may fail and trigger the next):
       // 1. Marketplace-aware blob: parses .claude-plugin/marketplace.json

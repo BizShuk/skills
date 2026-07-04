@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "skills": {
+    "apple-calendar": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "d0728b8054bcd077cafec255c870f71b30d18ccbcee37b598a286e05300f7de0"
+    },
+    "apple-email": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "ccd247b49322e9978f959d75ef1aeac5fa02e660cd92eee874dc9d88700eb47e"
+    },
+    "apple-notes": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "0167d9e6bde90f0007276608c15252b78ad719757c81015d0c940d21b013e41d"
+    },
+    "apple-reminders": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "bdc7f1bcbf5c00a106a39939f11fb1740b2ca1a64e352e7548f8048b43c81a5b"
+    },
+    "brainstorming": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "173973795ecfef18204c60127b0b10b9fd171b44e535182dc6dbc80d48df1f32"
+    },
+    "business-extract": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "263363edca8b00898abb0d25d3b965a185ce2feaf75f4fb0eebfe671bff63934"
+    },
+    "business-improvement": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "6db8aab812ac7ddcba108fff4c5deb2251607d1d912b296f21d5d360558f29aa"
+    },
+    "business-planner": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "ce56c85a92e29565a582404035e29c8ac75be979fd025196ea1ae4f5a463adf1"
+    },
+    "consistency": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "b6d2daee5f034cb722d813b74f1aa51abb1dd0638379e7df59ff0b3669329117"
+    },
+    "content-summarizer": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "f95fe1597b4a7e66a3361a7e734e5c0664570943c546b2a3b3f04d7102537376"
+    },
+    "daily-summary": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "5750d5c4b22036eee7826068880c20b750dd3e83c8b203342b8faeccfe9d64fc"
+    },
+    "dependency-hygiene": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "2f847c01ae62d695ece97f1c0f4a95f57ca12435c47e27c423140182c40ab340"
+    },
+    "dispatching-parallel-agents": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "85df55d2235a7623b315dac4bc340c14a37dcdc57c869c80a829e1a53a174689"
+    },
+    "doc-sync": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "a34ce0262d6ea0d67af5df35d116b5fe68d3c9e8b399a7be0d073f43d7e74e8c"
+    },
+    "executing-plans": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "d3e5b64b97d4713e3a7f33625cae12ed9305898d85a1c6309f46765c39a9d789"
+    },
+    "find-skills": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "1c27b1774a4ec17ad4556a72e3c0168beab3af0183b2c1b8aa9e320af3ff41ce"
+    },
+    "finishing-a-development-branch": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "aa2632ed96df59c36348bd8f8ec1ff0fb0c5cc68b60691834687bf4cedc6be3f"
+    },
+    "firecrawl": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "af6a0335fbf6d26e20841ac8e8fb6271df38b76bfff349d63ee60c0ed80125a6"
+    },
+    "folder-structure": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "73126b7b9a0dafa398cf23d3b586746652313c482d090eef7f7053041c05f590"
+    },
+    "golang-code-quality": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "5f9b6cfe571bc7c91ced60628dfcce38e02b70821417d48a32458394455a96f8"
+    },
+    "golang-dead-code": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "59127480563be52a9b8425d588e4c0c6d85733818920d202e4e9856c83eb34b7"
+    },
+    "golang-dev": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "87e58a9437c78b5876790a410d24020065eaeadc089b06b6d3b5ed5178b57627"
+    },
+    "golang-gosdk": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "4265553091ec772cf7ed3d4e9e54299db8a446109fe892b4fc8940da0299fbf9"
+    },
+    "golang-mvc": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "2eda7a024e2c6837abe10fe797ebfdccd96d3824c944ed9cc926a02b9d4d99c0"
+    },
+    "golang-naming": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "082ddda4b2c7a2e51e00940e13ac339494c2982d9aa5bf8a4b70441ecbeb2d5c"
+    },
+    "golang-network": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "0f76a0889b79a8c7ff240b12eea5a871e9936895eeeb9ddc96f40c92e48ef73b"
+    },
+    "golang-performance-tuning": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "8835ea2dc1f0aa747732738d53d8bb415079cc0d9ede9b20e1d9b0c4d3d544c3"
+    },
+    "learning-document": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "90772beaefb48e5922f1b151c899f7233a0730019e3f63f051389b57dc2b71d7"
+    },
+    "markdownlint": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "9ddb2e2a25c6f0ae55ba721657c8fb1ddbb7c04e6334af1285969421f7513e85"
+    },
+    "markitdown": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "11001cdd7a12ea963fd95eb8e900789670172ed2d639e950fdee29bff235324a"
+    },
+    "mermaid": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "88bf6991baba15258a21cc68bec1d971b68c3e16bd30dbcd5de5787fb96b61f0"
+    },
+    "migrate-zap-to-slog": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "01b15f4d74452a755be2eee05d0ddb2162470721fd796461eb3b22bc0ed620bb"
+    },
+    "model-evaluator": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "61e4cbc67fe4a58d3fbe88a59d5dcb5fd61a8829335484119e7d9183f667e327"
+    },
+    "naming-convention": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "6b8fb201269a22181d35796bbcd7c7fbe43a2b45ea77e1a59a3c2959d2b6b651"
+    },
+    "playwright-cli": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "1bac8b5cd77551e29da81a0212bb01e51f876f1b6d84ac2096ea92663d6269db"
+    },
+    "project-explore": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "4f4d10353d81ea77e1ffed724e3d028b1c3dd5f16ee517bb8847fffceafb76fa"
+    },
+    "project-route": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "5c7f9b2c54d16aa97fb46c8b9bfac3ff477948aa08f598c9481cfef156b66605"
+    },
+    "receiving-code-review": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "3f56080356c62e4f74a183d7371686babc661e41a952dc67a97c2c76fe8a9329"
+    },
+    "requesting-code-review": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "cde520e9118d7e6b74b5ab0123cff2f68d9c07bddb3f82c997753b6126600aed"
+    },
+    "scrapling": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "caae8cf896512b9053b293d18c48dc50a0120eda2317b91f09f5fbf31f0ffa78"
+    },
+    "subagent-driven-development": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "036b1c4e106dfcffb5649be5e37408374e21cae486758e3ba12fdeb45484bb49"
+    },
+    "summarize.sh": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "62163dec9fa6301558ad5cba79bcecb2d20995012ae22c238410bd1093226b36"
+    },
+    "system-planner": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "6e9e4f02869cfe11895cc6a37f62216015fd5e0a46ce7fffbc946e7414305cbe"
+    },
+    "topology-builder": {
+      "source": "/Users/shuk/projects/tmp/skills",
+      "sourceType": "local",
+      "computedHash": "b31b62b254b0d4c574284ff6f1a3f064e5c21f586d6cf00593614e05cf519aaa"
+    }
+  }
+}

@@ -3,6 +3,23 @@ import { join, dirname, resolve, normalize, sep } from 'path';
 import { parseSource, getOwnerRepo, parseOwnerRepo } from './source-parser.ts';
 
 /**
+ * Derive an `owner/repo` string from a raw git URL via the existing
+ * source-parser utilities. Returns null if the URL isn't GitHub/GitLab/SHA-
+ * style with a clear path component. Used by the marketplace walker to keep
+ * `ownerRepo` populated for non-github sources so cycle detection works
+ * regardless of source type.
+ */
+function deriveOwnerRepoFromUrl(url: string): string | null {
+  try {
+    const parsed = parseSource(url);
+    const ownerRepo = getOwnerRepo(parsed);
+    return ownerRepo && ownerRepo.includes('/') ? ownerRepo.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check if a path is contained within a base directory.
  * Prevents path traversal attacks via `..` segments or absolute paths.
  */
@@ -69,10 +86,29 @@ export function parseMarketplaceJson(content: string): MarketplaceManifest | nul
  * - `remote`: another git repo; caller should recurse into it
  * - `fallback`: source was omitted — use the parent repo itself
  * - `null`: source is invalid and should be skipped
+ *
+ * The `remote` variant always carries `ownerRepo` so cycle detection and BFS
+ * traversal in the marketplace walker keep working. `url`, `ref`, `sha`, and
+ * `subdir` are populated when the source type supplies them:
+ *
+ *   - github source    → ownerRepo (+ optional ref/sha)
+ *   - url source       → ownerRepo + url (+ optional ref/sha)
+ *   - git-subdir src   → ownerRepo + url + subdir (+ optional ref/sha)
  */
 export type ResolvedPluginSource =
   | { kind: 'local'; path: string }
-  | { kind: 'remote'; ownerRepo: string }
+  | {
+      kind: 'remote';
+      ownerRepo: string;
+      /** Full git URL, present for url / git-subdir sources */
+      url?: string;
+      /** Pinned ref (branch or tag) */
+      ref?: string;
+      /** Pinned commit SHA — stronger than ref */
+      sha?: string;
+      /** Subdir within the repo (git-subdir source) */
+      subdir?: string;
+    }
   | { kind: 'fallback'; ownerRepo: string }
   | null;
 
@@ -80,30 +116,88 @@ export type ResolvedPluginSource =
  * Map a marketplace plugin's `source` field to a normalized, actionable form.
  *
  * Supports:
- *   - undefined                 → fallback to the parent marketplace repo
- *   - "./relative/path"         → local, use as repo-relative path
- *   - "owner/repo" shorthand    → remote github
- *   - "github:owner/repo"       → remote github
- *   - "https://host/owner/repo" → remote (github / gitlab / git)
- *   - "git@host:owner/repo.git" → remote git
- *   - { source, repo } object   → remote github/gitlab via repo field
+ *   - undefined                       → fallback to the parent marketplace repo
+ *   - "./relative/path"               → local, use as repo-relative path
+ *   - "owner/repo" shorthand          → remote github
+ *   - "github:owner/repo"             → remote github
+ *   - "https://host/owner/repo"       → remote (github / gitlab / git)
+ *   - "git@host:owner/repo.git"       → remote git
+ *   - { source:'github', repo,        → remote github (ref/sha preserved)
+ *       ref?, sha? }
+ *   - { source:'url', url,            → remote (ownerRepo parsed from url,
+ *       ref?, sha? }                    ref/sha preserved)
+ *   - { source:'git-subdir',          → remote + subdir (ownerRepo from url,
+ *       url, path, ref?, sha? }         ref/sha preserved)
  *
  * Invalid inputs return null so the caller can skip the plugin cleanly.
  */
 export function resolvePluginSource(
-  sourceValue: string | { source?: string; repo?: string } | undefined,
+  sourceValue:
+    | string
+    | {
+        source?: string;
+        repo?: string;
+        url?: string;
+        path?: string;
+        ref?: string;
+        sha?: string;
+      }
+    | undefined,
   fallbackOwnerRepo: string
 ): ResolvedPluginSource {
   if (sourceValue === undefined) {
     return { kind: 'fallback', ownerRepo: fallbackOwnerRepo.toLowerCase() };
   }
 
-  // Object form: { source: 'github', repo: 'owner/name' }
+  // Object form: dispatch on the explicit `source` discriminator, then fall
+  // back to a `{ repo }`-only legacy form.
   if (typeof sourceValue === 'object' && sourceValue !== null) {
+    const ref = typeof sourceValue.ref === 'string' ? sourceValue.ref : undefined;
+    const sha = typeof sourceValue.sha === 'string' ? sourceValue.sha : undefined;
+    const sourceType = sourceValue.source;
+
+    // git-subdir: { source:'git-subdir', url, path, ref?, sha? }
+    if (sourceType === 'git-subdir') {
+      const url = sourceValue.url;
+      const subpath = sourceValue.path;
+      if (typeof url !== 'string' || typeof subpath !== 'string') return null;
+      const ownerRepo = deriveOwnerRepoFromUrl(url);
+      if (!ownerRepo) return null;
+      return {
+        kind: 'remote',
+        ownerRepo,
+        url,
+        subdir: subpath,
+        ...(ref ? { ref } : {}),
+        ...(sha ? { sha } : {}),
+      };
+    }
+
+    // url: { source:'url', url, ref?, sha? }
+    if (sourceType === 'url') {
+      const url = sourceValue.url;
+      if (typeof url !== 'string') return null;
+      const ownerRepo = deriveOwnerRepoFromUrl(url);
+      if (!ownerRepo) return null;
+      return {
+        kind: 'remote',
+        ownerRepo,
+        url,
+        ...(ref ? { ref } : {}),
+        ...(sha ? { sha } : {}),
+      };
+    }
+
+    // github (or legacy { repo }): { source:'github', repo, ref?, sha? }
     const repoStr = sourceValue.repo;
     const parsed = typeof repoStr === 'string' ? parseOwnerRepo(repoStr) : null;
     if (parsed) {
-      return { kind: 'remote', ownerRepo: `${parsed.owner}/${parsed.repo}`.toLowerCase() };
+      return {
+        kind: 'remote',
+        ownerRepo: `${parsed.owner}/${parsed.repo}`.toLowerCase(),
+        ...(ref ? { ref } : {}),
+        ...(sha ? { sha } : {}),
+      };
     }
     return null;
   }
@@ -338,4 +432,62 @@ export async function getPluginGroupings(basePath: string): Promise<Map<string, 
   }
 
   return groupings;
+}
+
+/**
+ * A remote-source plugin entry from a local marketplace.json.
+ *
+ * Plugins whose `source` field is an object (e.g. `{source: "github", repo: "owner/name"}`)
+ * point at an external repository. The local skills CLI cannot discover their
+ * skills on disk — callers must fetch them via the blob path (see
+ * `tryMarketplaceBlobInstall` in blob.ts) using `ownerRepo` + optional `ref`/`sha`.
+ */
+export interface MarketplaceRemotePlugin {
+  pluginName: string;
+  ownerRepo: string;
+  ref?: string;
+  sha?: string;
+}
+
+/**
+ * Collect every github/url/git-subdir source plugin from a local marketplace.json.
+ *
+ * Local-source plugins (string `source` paths) are skipped — those are handled
+ * by `getPluginSkillPaths` / `getPluginGroupings`. Only object-form sources
+ * pointing at remote repositories are returned, so callers can fetch their
+ * skills via the blob install path.
+ *
+ * Returns an empty array when:
+ *   - the marketplace.json file is missing or malformed
+ *   - the manifest declares no plugins
+ *   - every plugin uses a local string source
+ */
+export async function getMarketplaceRemotePlugins(
+  basePath: string
+): Promise<MarketplaceRemotePlugin[]> {
+  const out: MarketplaceRemotePlugin[] = [];
+  try {
+    const content = await readFile(join(basePath, '.claude-plugin/marketplace.json'), 'utf-8');
+    const manifest = parseMarketplaceJson(content);
+    if (!manifest?.plugins) return out;
+
+    for (const plugin of manifest.plugins) {
+      if (!plugin.name) continue;
+      // Only object-form sources (remote). String paths are local.
+      if (typeof plugin.source !== 'object' || plugin.source === null) continue;
+
+      const resolved = resolvePluginSource(plugin.source, '');
+      if (!resolved || resolved.kind !== 'remote') continue;
+
+      out.push({
+        pluginName: plugin.name,
+        ownerRepo: resolved.ownerRepo,
+        ...(resolved.ref ? { ref: resolved.ref } : {}),
+        ...(resolved.sha ? { sha: resolved.sha } : {}),
+      });
+    }
+  } catch {
+    // File doesn't exist or invalid JSON — return empty list
+  }
+  return out;
 }
