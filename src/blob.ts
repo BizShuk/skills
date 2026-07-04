@@ -11,8 +11,10 @@
  */
 
 import { createHash } from 'node:crypto';
+import { basename, dirname, join } from 'path';
 import { parseFrontmatter } from './frontmatter.ts';
 import { sanitizeMetadata } from './sanitize.ts';
+import { parseMarketplaceJson, resolvePluginSource } from './plugin-manifest.ts';
 import type { Skill } from './types.ts';
 
 // ─── Types ───
@@ -566,4 +568,332 @@ export async function tryBlobInstall(
   });
 
   return { skills: blobSkills, tree };
+}
+
+// ─── Marketplace-aware blob install ───
+
+/** Max recursion depth for nested marketplace.json / remote plugin sources. */
+const MAX_PLUGIN_DEPTH = 3;
+
+/**
+ * A SKILL.md candidate discovered via marketplace.json traversal.
+ * Tracks enough context to fetch content + download later.
+ */
+interface MarketplaceCandidate {
+  /** Path of SKILL.md within its owning repo (e.g., "skills/pdf-helper/SKILL.md") */
+  mdPath: string;
+  /** Parent folder name (basename of dirname) — used as skill display name */
+  folderName: string;
+  /** Grouping tag from marketplace plugin.name */
+  pluginName: string | undefined;
+  /** The repo to fetch SKILL.md content from */
+  effectiveOwnerRepo: string;
+  /** Branch of effectiveOwnerRepo */
+  branch: string;
+}
+
+/**
+ * Fetch `.claude-plugin/marketplace.json` from raw.githubusercontent.com.
+ * Returns null on 404, network error, or invalid JSON.
+ *
+ * Uses `HEAD` as default ref since raw.githubusercontent.com only resolves
+ * concrete branches — callers should pass an explicit ref (typically from
+ * the Trees API branch field).
+ */
+export async function fetchMarketplaceJson(
+  ownerRepo: string,
+  ref: string = 'HEAD'
+): Promise<ReturnType<typeof parseMarketplaceJson>> {
+  const url = `https://raw.githubusercontent.com/${ownerRepo}/${encodeURIComponent(ref)}/.claude-plugin/marketplace.json`;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
+    });
+    if (!response.ok) return null;
+    const content = await response.text();
+    return parseMarketplaceJson(content);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Strip leading "./" or "/" from a marketplace skill path so we can prefix it
+ * with another directory safely. Returns empty string for the root path.
+ */
+function normalizePluginPath(p: string): string {
+  if (p === './' || p === '/') return '';
+  if (p.startsWith('./')) return p.slice(2);
+  if (p.startsWith('/')) return p.slice(1);
+  return p;
+}
+
+/**
+ * Walk a repo's marketplace.json plus any nested remote plugin sources,
+ * collecting every SKILL.md candidate. Recursion uses a BFS queue so:
+ *   - depth is bounded (MAX_PLUGIN_DEPTH)
+ *   - visited repos are skipped (cycle protection)
+ *   - sub-plugins from remote sources flatten under the parent's plugin.name
+ *
+ * Returns the root repo's tree so callers can do hash lookups for the
+ * lockfile. Sub-plugin skills won't have entries in that tree (they live
+ * in the sub-repo); callers should fall back to other hash sources for them.
+ */
+async function discoverViaMarketplace(
+  rootOwnerRepo: string,
+  options: {
+    ref?: string;
+    getToken?: () => string | null;
+  },
+  rootTree: RepoTree
+): Promise<{ candidates: MarketplaceCandidate[] } | null> {
+  const candidates: MarketplaceCandidate[] = [];
+  const visited = new Set<string>();
+  const rootKey = rootOwnerRepo.toLowerCase();
+  // Seed the queue with the already-fetched root tree to avoid a re-fetch
+  const queue: Array<{
+    ownerRepo: string;
+    tree: RepoTree | null;
+    parentPluginName: string | undefined;
+    depth: number;
+  }> = [{ ownerRepo: rootOwnerRepo, tree: rootTree, parentPluginName: undefined, depth: 0 }];
+
+  while (queue.length > 0) {
+    const { ownerRepo: currentRepo, tree: currentTree, parentPluginName, depth } = queue.shift()!;
+    if (depth >= MAX_PLUGIN_DEPTH) continue;
+    const key = currentRepo.toLowerCase();
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    // Resolve the tree: use pre-fetched root tree, otherwise fetch now
+    const tree = currentTree ?? (await fetchRepoTree(currentRepo, options.ref, options.getToken));
+    if (!tree) continue;
+
+    const manifest = await fetchMarketplaceJson(currentRepo, tree.branch);
+    if (!manifest?.plugins?.length) continue;
+
+    for (const plugin of manifest.plugins) {
+      const source = resolvePluginSource(plugin.source, currentRepo);
+      if (!source) continue;
+
+      // Sub-plugin flattening: when this plugin is reached via a remote source
+      // (parentPluginName set), all skills discovered here inherit the parent's
+      // plugin.name. This makes the remote source behave as one sub-plugin
+      // under the parent rather than exposing inner marketplace.json names.
+      const effectivePluginName = parentPluginName ?? plugin.name;
+
+      // Remote source: queue it as a sub-plugin and let its marketplace.json
+      // be walked in a future iteration. Skills inside the sub-repo will
+      // inherit effectivePluginName from the parent's plugin.name.
+      if (source.kind === 'remote' && source.ownerRepo.toLowerCase() !== key) {
+        queue.push({
+          ownerRepo: source.ownerRepo,
+          tree: null,
+          parentPluginName: effectivePluginName,
+          depth: depth + 1,
+        });
+        continue;
+      }
+
+      // Local / fallback: collect SKILL.md paths under plugin.skills (and the
+      // conventional ./skills/ fallback when plugin.skills is undefined).
+      //
+      // pluginBase mirrors the filesystem layout: pluginRoot (from
+      // marketplace.metadata) + plugin.source (when local). All plugin.skills
+      // paths are resolved relative to pluginBase.
+      let pluginBase = '';
+      const pluginRoot = manifest.metadata?.pluginRoot;
+      if (pluginRoot) {
+        pluginBase = normalizePluginPath(pluginRoot);
+      }
+      if (source.kind === 'local') {
+        const sourcePath = normalizePluginPath(source.path);
+        pluginBase = pluginBase ? join(pluginBase, sourcePath) : sourcePath;
+      }
+
+      const explicitDirs = (plugin.skills ?? []).map(normalizePluginPath);
+      const conventionalDir = 'skills';
+      const candidateDirs: string[] = [];
+      if (explicitDirs.length > 0) {
+        for (const d of explicitDirs) candidateDirs.push(join(pluginBase, d));
+        candidateDirs.push(join(pluginBase, conventionalDir));
+      } else {
+        // No explicit skills: fall back to the conventional ./skills/ dir
+        // under pluginBase (which may be empty for root plugins).
+        candidateDirs.push(join(pluginBase, conventionalDir));
+      }
+
+      for (const dir of candidateDirs) {
+        if (!dir) continue;
+        const prefix = `${dir}/`;
+        for (const entry of tree.tree) {
+          if (entry.type !== 'blob') continue;
+          const lowerPath = entry.path.toLowerCase();
+          if (!lowerPath.endsWith('/skill.md')) continue;
+          if (!entry.path.startsWith(prefix)) continue;
+          // Skip duplicate candidates (when explicit + conventional overlap)
+          const dup = candidates.some(
+            (c) => c.mdPath === entry.path && c.effectiveOwnerRepo.toLowerCase() === key
+          );
+          if (dup) continue;
+          candidates.push({
+            mdPath: entry.path,
+            folderName: basename(dirname(entry.path)),
+            pluginName: effectivePluginName,
+            effectiveOwnerRepo: currentRepo,
+            branch: tree.branch,
+          });
+        }
+      }
+    }
+  }
+
+  // Touch rootKey so eslint doesn't complain about the unused variable
+  void rootKey;
+
+  return candidates.length > 0 ? { candidates } : null;
+}
+
+/**
+ * Marketplace-aware blob install path.
+ *
+ * 1. Walk marketplace.json (and any nested remote plugin sources) to find
+ *    SKILL.md candidates, using folder name as skill name and plugin.name as
+ *    pluginName (for grouping).
+ * 2. Fetch each candidate's SKILL.md from raw.githubusercontent.com and
+ *    parse the frontmatter (description still comes from frontmatter — only
+ *    the skill NAME switches to the folder).
+ * 3. Download the snapshot for each skill from the skills.sh download API.
+ *
+ * Returns null on any failure so the caller can fall back to clone.
+ */
+export async function tryMarketplaceBlobInstall(
+  ownerRepo: string,
+  options: {
+    subpath?: string;
+    skillFilter?: string;
+    ref?: string;
+    getToken?: () => string | null;
+    includeInternal?: boolean;
+  } = {}
+): Promise<BlobInstallResult | null> {
+  // Pre-fetch the root tree so we can return it with the BlobInstallResult
+  // (used downstream by getSkillFolderHashFromTree for lockfile entries).
+  const rootTree = await fetchRepoTree(ownerRepo, options.ref, options.getToken);
+  if (!rootTree) return null;
+
+  const discovery = await discoverViaMarketplace(ownerRepo, options, rootTree);
+  if (!discovery) return null;
+
+  let candidates = discovery.candidates;
+
+  // Apply subpath filter
+  if (options.subpath) {
+    const prefix = options.subpath.endsWith('/') ? options.subpath : options.subpath + '/';
+    candidates = candidates.filter(
+      (c) => c.mdPath.startsWith(prefix) || c.mdPath === options.subpath
+    );
+    if (candidates.length === 0) return null;
+  }
+
+  // Apply skillFilter by folder name (matches the existing blob fast path's
+  // folder-based filter so behavior stays consistent)
+  if (options.skillFilter) {
+    const filterSlug = toSkillSlug(options.skillFilter);
+    const filtered = candidates.filter((c) => toSkillSlug(c.folderName) === filterSlug);
+    if (filtered.length === 0) return null;
+    candidates = filtered;
+  }
+
+  // Fetch SKILL.md content from raw.githubusercontent.com in parallel
+  const contentFetches = await Promise.all(
+    candidates.map(async (c) => {
+      const url = `https://raw.githubusercontent.com/${c.effectiveOwnerRepo}/${encodeURIComponent(c.branch)}/${c.mdPath}`;
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+        if (!res.ok) return null;
+        const content = await res.text();
+        return { candidate: c, content };
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const parsedSkills: Array<{
+    candidate: MarketplaceCandidate;
+    name: string;
+    description: string;
+    content: string;
+    slug: string;
+    metadata?: Record<string, unknown>;
+  }> = [];
+
+  for (const fetched of contentFetches) {
+    if (!fetched) continue;
+    const { candidate, content } = fetched;
+    const { data } = parseFrontmatter(content);
+    if (!data.description) continue;
+    if (typeof data.description !== 'string') continue;
+
+    // Skip internal skills unless explicitly requested
+    const isInternal = (data.metadata as Record<string, unknown>)?.internal === true;
+    if (isInternal && !options.includeInternal) continue;
+
+    // Skill name = parent folder name (per product decision: marketplace
+    // discovery surfaces the folder as the canonical skill identity)
+    const name = candidate.folderName;
+
+    parsedSkills.push({
+      candidate,
+      name,
+      description: sanitizeMetadata(data.description),
+      content,
+      slug: toSkillSlug(name),
+      metadata: data.metadata as Record<string, unknown> | undefined,
+    });
+  }
+
+  if (parsedSkills.length === 0) return null;
+
+  // Download snapshots — same per-repo download URL scheme as tryBlobInstall.
+  // For nested sub-plugins, the effective ownerRepo is the sub-repo.
+  const downloads = await Promise.all(
+    parsedSkills.map(async (skill) => {
+      const source = skill.candidate.effectiveOwnerRepo.toLowerCase();
+      const download = await fetchSkillDownload(source, skill.slug);
+      return { skill, download };
+    })
+  );
+
+  // If ANY download failed, fall back — we don't do partial marketplace installs
+  if (downloads.some((d) => d.download === null)) return null;
+
+  // Convert to BlobSkill objects
+  const blobSkills: BlobSkill[] = downloads.map(({ skill, download }) => {
+    const folderPath = skill.candidate.mdPath.toLowerCase().endsWith('/skill.md')
+      ? skill.candidate.mdPath.slice(0, -9)
+      : skill.candidate.mdPath.toLowerCase() === 'skill.md'
+        ? ''
+        : skill.candidate.mdPath.slice(0, -9);
+
+    const files = folderPath
+      ? download!.files
+      : download!.files.filter((file) => file.path.toLowerCase() === 'skill.md');
+
+    return {
+      name: skill.name,
+      description: skill.description,
+      path: '',
+      rawContent: skill.content,
+      metadata: skill.metadata,
+      files,
+      snapshotHash:
+        files.length === download!.files.length ? download!.hash : computeSnapshotHash(files),
+      repoPath: skill.candidate.mdPath,
+      pluginName: skill.candidate.pluginName,
+    };
+  });
+
+  return { skills: blobSkills, tree: rootTree };
 }

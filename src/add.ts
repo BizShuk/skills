@@ -73,6 +73,7 @@ import { addSkillToLocalLock, computeSkillFolderHash } from './local-lock.ts';
 import type { Skill, AgentType } from './types.ts';
 import {
   tryBlobInstall,
+  tryMarketplaceBlobInstall,
   BLOB_ALLOWED_REPOS,
   getSkillFolderHashFromTree,
   fetchRepoTree,
@@ -1127,17 +1128,18 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         fullDepth: options.fullDepth,
       });
     } else if (parsed.type === 'github' && !options.fullDepth) {
-      // Try the blob-based fast install for GitHub sources; skip for --full-depth.
-      // Eligible per repo (a BLOB_ALLOWED_REPOS entry = self-hosted download URL) or
-      // per owner (BLOB_ALLOWED_OWNERS = all their repos, skills.sh-hosted).
-      const BLOB_ALLOWED_OWNERS = ['vercel', 'vercel-labs', 'heygen-com'];
+      // Three-step blob discovery (each may fail and trigger the next):
+      // 1. Marketplace-aware blob: parses .claude-plugin/marketplace.json
+      //    and tags skills with plugin.name for grouping. Works for any
+      //    GitHub repo that ships a marketplace manifest, no allowlist gate.
+      // 2. Legacy PRIORITY_PREFIXES blob for allowlisted repos (vercel /
+      //    vercel-labs / heygen-com or self-hosted in BLOB_ALLOWED_REPOS).
+      // 3. Full clone as last resort.
       const ownerRepo = getOwnerRepo(parsed);
-      const owner = ownerRepo?.split('/')[0]?.toLowerCase();
-      const isSelfHostedRepo =
-        !!ownerRepo && Object.hasOwn(BLOB_ALLOWED_REPOS, ownerRepo.toLowerCase());
-      if (ownerRepo && owner && (isSelfHostedRepo || BLOB_ALLOWED_OWNERS.includes(owner))) {
-        spinner.start('Fetching skills...');
-        blobResult = await tryBlobInstall(ownerRepo, {
+      if (ownerRepo) {
+        // Step 1: marketplace.json walk
+        spinner.start('Looking for marketplace.json...');
+        blobResult = await tryMarketplaceBlobInstall(ownerRepo, {
           subpath: parsed.subpath,
           skillFilter: parsed.skillFilter,
           ref: parsed.ref,
@@ -1145,7 +1147,27 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
           includeInternal,
         });
         if (!blobResult) {
-          spinner.stop(pc.dim('Falling back to clone...'));
+          spinner.stop(pc.dim('No marketplace.json, trying legacy blob path...'));
+        }
+
+        // Step 2: legacy blob for allowlisted repos
+        if (!blobResult) {
+          const BLOB_ALLOWED_OWNERS = ['vercel', 'vercel-labs', 'heygen-com'];
+          const owner = ownerRepo.split('/')[0]?.toLowerCase();
+          const isSelfHostedRepo = Object.hasOwn(BLOB_ALLOWED_REPOS, ownerRepo.toLowerCase());
+          if (owner && (isSelfHostedRepo || BLOB_ALLOWED_OWNERS.includes(owner))) {
+            spinner.start('Fetching skills via legacy blob...');
+            blobResult = await tryBlobInstall(ownerRepo, {
+              subpath: parsed.subpath,
+              skillFilter: parsed.skillFilter,
+              ref: parsed.ref,
+              getToken: getGitHubToken,
+              includeInternal,
+            });
+            if (!blobResult) {
+              spinner.stop(pc.dim('Falling back to clone...'));
+            }
+          }
         }
       }
 
@@ -1153,7 +1175,7 @@ export async function runAdd(args: string[], options: AddOptions = {}): Promise<
         skills = blobResult.skills;
         spinner.stop(`Found ${pc.green(skills.length)} skill${skills.length > 1 ? 's' : ''}`);
       } else {
-        // Blob failed — fall back to git clone
+        // Both blob paths failed — fall back to git clone
         spinner.start('Cloning repository...');
         tempDir = await cloneRepo(parsed.url, parsed.ref);
         spinner.stop('Repository cloned');
