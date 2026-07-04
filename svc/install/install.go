@@ -38,13 +38,18 @@ func Apply(sel Selection) error {
 			return fmt.Errorf("install: resolve cwd: %w", err)
 		}
 	}
-	home := os.Getenv("HOME")
 
-	for _, agent := range sel.Agents {
-		destRoot, ok := resolveDestRoot(agent, sel.Global, cwd, home)
-		if !ok {
+	for _, a := range sel.Agents {
+		destRoot := a.ProjectSkillsDir
+		if sel.Global {
+			destRoot = a.UserSkillsDir
+		}
+		if destRoot == "" {
 			// Missing/empty directory in this mode → silent skip per spec.
 			continue
+		}
+		if !sel.Global && !filepath.IsAbs(destRoot) {
+			destRoot = filepath.Join(cwd, destRoot)
 		}
 
 		for _, src := range sel.SkillPaths {
@@ -56,31 +61,6 @@ func Apply(sel Selection) error {
 		}
 	}
 	return nil
-}
-
-// resolveDestRoot returns the absolute destination root for this agent under
-// the requested mode, plus a bool indicating whether the root is usable.
-// Empty / unset directory fields produce ok=false so Apply skips the agent.
-//
-// In project mode, an absolute ProjectSkillsDir is honored as-is; a relative
-// one is joined to cwd. In global mode, $HOME is expanded inline so the
-// resolved path is always absolute.
-func resolveDestRoot(agent Agent, global bool, cwd, home string) (string, bool) {
-	if global {
-		root := expandHome(agent.UserSkillsDir, home)
-		if root == "" {
-			return "", false
-		}
-		return root, true
-	}
-	root := agent.ProjectSkillsDir
-	if root == "" {
-		return "", false
-	}
-	if filepath.IsAbs(root) {
-		return root, true
-	}
-	return filepath.Join(cwd, root), true
 }
 
 // copyTree recursively copies src (a file or directory) to dst. The

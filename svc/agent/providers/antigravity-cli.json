@@ -1,0 +1,9 @@
+{
+  "type": "antigravity-cli",
+  "displayName": "Antigravity CLI",
+  "projectSkillsDir": ".agents/skills",
+  "userSkillsDir": "~/.gemini/antigravity-cli/skills",
+  "projectAgentsDir": ".agents/agents",
+  "userAgentsDir": "~/.gemini/antigravity-cli/agents",
+  "detectDir": "~/.gemini/antigravity-cli"
+}

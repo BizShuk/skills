@@ -1,0 +1,9 @@
+{
+  "type": "claude-code",
+  "displayName": "Claude Code",
+  "projectSkillsDir": ".claude/skills",
+  "userSkillsDir": "~/.claude/skills",
+  "projectAgentsDir": ".claude/agents",
+  "userAgentsDir": "~/.claude/agents",
+  "detectDir": "~/.claude"
+}

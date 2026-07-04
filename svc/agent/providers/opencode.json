@@ -1,0 +1,9 @@
+{
+  "type": "opencode",
+  "displayName": "OpenCode",
+  "projectSkillsDir": ".agents/skills",
+  "userSkillsDir": "~/.config/opencode/skills",
+  "projectAgentsDir": ".agents/agents",
+  "userAgentsDir": "~/.config/opencode/agents",
+  "detectDir": "~/.config/opencode"
+}

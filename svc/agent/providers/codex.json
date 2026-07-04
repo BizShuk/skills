@@ -1,0 +1,9 @@
+{
+  "type": "codex",
+  "displayName": "Codex",
+  "projectSkillsDir": ".agents/skills",
+  "userSkillsDir": "~/.codex/skills",
+  "projectAgentsDir": ".agents/agents",
+  "userAgentsDir": "~/.codex/agents",
+  "detectDir": "~/.codex"
+}

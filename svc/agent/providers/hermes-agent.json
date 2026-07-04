@@ -1,0 +1,9 @@
+{
+  "type": "hermes-agent",
+  "displayName": "Hermes Agent",
+  "projectSkillsDir": ".hermes/skills",
+  "userSkillsDir": "~/.hermes/skills",
+  "projectAgentsDir": ".hermes/agents",
+  "userAgentsDir": "~/.hermes/agents",
+  "detectDir": "~/.hermes"
+}
