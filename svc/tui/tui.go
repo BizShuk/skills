@@ -56,8 +56,12 @@ type Model struct {
 // NewModel materializes the model's rows from the given catalog. Every
 // skill starts checked — the user can opt out with space — and failed
 // plugins still contribute a header row (to surface the fetch failure)
-// but no skill rows of their own. Fold state begins empty so everything
-// starts unfolded.
+// but no skill rows of their own.
+//
+// Fold state: only the top-level (Roots) plugins start expanded. Every
+// nested sub-plugin starts folded so the user is not overwhelmed by a
+// deeply nested marketplace on first glance; they can drill in with the
+// right-arrow key.
 func NewModel(cat *discover.Catalog) Model {
 	m := Model{
 		cat:     cat,
@@ -66,6 +70,19 @@ func NewModel(cat *discover.Catalog) Model {
 	}
 	for _, s := range cat.AllSkills() {
 		m.checked[s.Path] = true
+	}
+	// Pre-fold every nested sub-plugin. Roots stay expanded. We do this in
+	// a second pass after checked is populated so that rebuildRows sees a
+	// stable fold state when it walks the tree.
+	var foldNested func(parent *discover.Category)
+	foldNested = func(parent *discover.Category) {
+		for _, ch := range parent.Children {
+			m.folded[ch] = true
+			foldNested(ch)
+		}
+	}
+	for _, root := range cat.Roots {
+		foldNested(root)
 	}
 	m.rebuildRows()
 	return m

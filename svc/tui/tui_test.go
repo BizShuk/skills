@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -173,33 +172,28 @@ func TestSpaceOnCategoryHeaderTogglesAllDescendantSkills(t *testing.T) {
 	assert.Len(t, sel, 2, "header Space again should recheck every descendant skill")
 }
 
-// TestRightArrowExpandsAndLeftFolds verifies that the fold/unfold keys
-// change the visible row count. With one root, one child and one skill
-// inside the child, the expanded View shows 3 visible rows (header +
-// child header + skill); folding the root collapses to 1 visible row
-// (just the root header). The test uses strings.Count on the rendered
-// View so it would catch a regression in fold rendering, not just in
-// the internal rows slice.
+// TestRightArrowExpandsAndLeftFolds walks the user through the fold
+// transitions on the inner (nested) sub-plugin. Roots start expanded;
+// nested sub-plugins start folded but their header remains visible so
+// the user can navigate to it and Right-arrow to expand.
+//
+//   step 0: initial       → 2 rows (outer header + inner header; inner folded)
+//   step 1: Down to inner → cursor 1
+//   step 2: Right on inner → 3 rows (+ helper skill)
+//   step 3: Left on inner  → 2 rows (helper re-hidden)
 func TestRightArrowExpandsAndLeftFolds(t *testing.T) {
 	cat := oneNestedCatalog()
 	m := NewModel(cat)
-	require.Equal(t, 0, m.cursor)
-	require.GreaterOrEqual(t, len(m.rows), 3, "expanded default should have at least 3 rows (root header + child header + skill)")
+	require.Equal(t, 2, len(m.rows), "outer + inner headers, inner folded")
 
-	expandedView := m.View()
-	expandedLines := strings.Count(expandedView, "\n")
+	mDown := mustModel(t, sendKey(m, tea.KeyDown))
+	require.Equal(t, 1, mDown.cursor, "Down moves cursor to the inner header")
 
-	// Fold: Left on the root header collapses the subtree.
-	folded := mustModel(t, sendKey(m, tea.KeyLeft))
-	foldedView := folded.View()
-	foldedLines := strings.Count(foldedView, "\n")
+	expanded := mustModel(t, sendKey(mDown, tea.KeyRight))
+	require.Equal(t, 3, len(expanded.rows), "Right on inner header should reveal its helper skill")
 
-	assert.Equal(t, 1, len(folded.rows), "after folding the root, only the root header remains visible")
-	assert.Less(t, foldedLines, expandedLines, "folding must reduce the line count in the rendered View")
-
-	// Unfold: Right on the (now visible) root header restores both rows.
-	expanded := mustModel(t, sendKey(folded, tea.KeyRight))
-	assert.Equal(t, len(m.rows), len(expanded.rows), "after unfolding, the row count matches the initial expanded state")
+	reFolded := mustModel(t, sendKey(expanded, tea.KeyLeft))
+	require.Equal(t, 2, len(reFolded.rows), "Left on inner header should re-hide its helper skill")
 }
 
 // TestSpaceOnCategoryHeaderTogglesNestedSubtree verifies that the
@@ -229,4 +223,27 @@ func TestSpaceOnCategoryHeaderTogglesNestedSubtree(t *testing.T) {
 	m1 := mustModel(t, sendKey(m, tea.KeySpace))
 	sel := m1.Selection().SkillPaths
 	assert.Empty(t, sel, "Space on root header should clear both root and nested subtree skills")
+}
+
+// TestNewModelFoldsNestedSubPluginsByDefault locks in the default-view
+// policy: a brand-new Model shows only the *first layer of skills* —
+// i.e. Roots and their direct skill rows. Nested sub-plugin HEADERS
+// remain visible (so the user can drill in with Right-arrow), but their
+// skill rows and any deeper sub-plugins are hidden until the user
+// expands them.
+//
+// Verified two ways:
+//   1. The inner plugin's skill ("helper") must not appear in the rendered View.
+//   2. The inner plugin header itself IS visible (so it can be navigated to
+//      and Right-arrowed). Asserted via presence of "inner" in the View.
+func TestNewModelFoldsNestedSubPluginsByDefault(t *testing.T) {
+	cat := oneNestedCatalog()
+	m := NewModel(cat)
+
+	require.GreaterOrEqual(t, len(m.rows), 2, "Roots + nested sub-plugin header should both be visible (folded but reachable)")
+
+	view := m.View()
+	assert.Contains(t, view, "outer", "root header must render")
+	assert.Contains(t, view, "inner", "nested sub-plugin header must remain visible so the user can navigate to and unfold it")
+	assert.NotContains(t, view, "helper", "nested skill row must NOT render until the user expands the inner plugin")
 }
