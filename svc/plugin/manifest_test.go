@@ -191,11 +191,9 @@ func TestScan_DescriptionReadsFirstBodyLine(t *testing.T) {
 		"description should be the first non-heading, non-empty body line, trimmed")
 }
 
-// TestScan_DescriptionTruncatesLongLines verifies that descriptions
-// longer than descMaxChars (60 runes) are truncated to that width and
-// suffixed with "...". CJK characters are counted as one rune each so
-// the cut respects characters, not bytes.
-func TestScan_DescriptionTruncatesLongLines(t *testing.T) {
+// TestScan_DescriptionReadsLongLinesRaw verifies that descriptions
+// longer than 60 runes are read in full without truncation.
+func TestScan_DescriptionReadsLongLinesRaw(t *testing.T) {
 	base := t.TempDir()
 	cpDir := filepath.Join(base, ".claude-plugin")
 	require.NoError(t, os.MkdirAll(cpDir, 0o755))
@@ -204,17 +202,15 @@ func TestScan_DescriptionTruncatesLongLines(t *testing.T) {
 
 	skillDir := filepath.Join(base, "skills", "long")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
-	long := "# title\n\n" + strings.Repeat("abcdefghij", 10) // 100 ascii chars
+	expected := strings.Repeat("abcdefghij", 10) // 100 ascii chars
+	long := "# title\n\n" + expected
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(long), 0o644))
 
 	parsed, err := Scan(base)
 	require.NoError(t, err)
 	require.Len(t, parsed.Locals[0].Skills, 1)
 	got := parsed.Locals[0].Skills[0].Description
-	assert.True(t, strings.HasSuffix(got, "..."), "long description should end with ellipsis: %q", got)
-	// Rune length of the visible (non-ellipsis) part must be ≤ descMaxChars (60).
-	assert.Equal(t, descMaxChars, len([]rune(got))-3,
-		"prefix should be exactly descMaxChars runes before the ellipsis")
+	assert.Equal(t, expected, got, "description should be read in full")
 }
 
 // TestScan_SkillJsonOnly verifies that skill.json at root and .claude/skills conventional
@@ -254,5 +250,25 @@ func TestScan_DescriptionReadsYAMLFrontmatter(t *testing.T) {
 	require.Len(t, parsed.Locals[0].Skills, 1)
 	assert.Equal(t, "This is a beautiful skill description", parsed.Locals[0].Skills[0].Description)
 }
+
+// TestScan_DescriptionReadsYAMLFrontmatterMultiline verifies that multiline YAML
+// description fields (e.g. using folded style) are successfully parsed.
+func TestScan_DescriptionReadsYAMLFrontmatterMultiline(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"ui-ux"}`), 0o644))
+
+	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	body := `---\nname: apple-reminders\ndescription: >\n    Use when managing Apple reminders\n    on macOS.\nversion: "1.0.0"\n---\n# Title`
+	body = strings.ReplaceAll(body, "\\n", "\n")
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "Use when managing Apple reminders on macOS.", parsed.Locals[0].Skills[0].Description)
+}
+
 
 

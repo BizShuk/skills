@@ -655,4 +655,48 @@ func TestRemoteRootPluginsAreFoldedByDefault(t *testing.T) {
 	assert.NotContains(t, view, "remote-skill", "remote root plugin skill must NOT render since it starts folded")
 }
 
+// TestSkillDescriptionFoldUnfold verifies that a skill with a long description
+// starts folded (truncated) and can be unfolded with Right-arrow to show the
+// full description on the next line, and folded back with Left-arrow.
+func TestSkillDescriptionFoldUnfold(t *testing.T) {
+	longDesc := "This is an extremely long description that definitely exceeds sixty characters to test the folding behavior."
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "p1",
+				FetchOK:    true,
+				Skills: []plugin.Skill{
+					{
+						Name:        "long-skill",
+						Path:        "/p/long",
+						Description: longDesc,
+					},
+				},
+			},
+		},
+	}
+	m := NewModel(cat, nil)
+	view1 := m.View()
+	assert.Contains(t, view1, "long-skill — This is an extremely long description that definitely exceed...",
+		"folded view should truncate the description to 60 characters with ellipsis")
+
+	// Move cursor to the skill (row 1, since row 0 is the category header)
+	mDown := mustModel(t, sendKey(m, tea.KeyDown))
+	require.Equal(t, 1, mDown.cursor)
+
+	// Press Right to unfold
+	unfolded := mustModel(t, sendKey(mDown, tea.KeyRight))
+	view2 := unfolded.View()
+	assert.NotContains(t, view2, "long-skill —", "unfolded view should not show description on the name line")
+	assert.Contains(t, view2, "This is an extremely long description that", "unfolded view should show the full description")
+	assert.Contains(t, view2, "to test the folding behavior.", "unfolded view should show the wrapped/remaining description")
+
+	// Press Left to fold back
+	foldedBack := mustModel(t, sendKey(unfolded, tea.KeyLeft))
+	view3 := foldedBack.View()
+	assert.Contains(t, view3, "long-skill — This is an extremely long description that definitely exceed...",
+		"folded-back view should return to the truncated description")
+}
+
+
 

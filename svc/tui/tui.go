@@ -98,10 +98,11 @@ type Model struct {
 	search      textinput.Model // inline search field
 	searchQuery string          // cached lower-cased trimmed query
 
-	global  bool
-	done    bool
-	folded  map[*plugin.Category]bool // fold state keyed by Category pointer
-	checked map[string]bool             // checked state keyed by Skill.Path
+	global        bool
+	done          bool
+	folded        map[*plugin.Category]bool // fold state keyed by Category pointer
+	checked       map[string]bool             // checked state keyed by Skill.Path
+	skillUnfolded map[string]bool             // unfolded state keyed by Skill.Path
 
 	// Agent-phase fields.
 	phase       int        // phaseSkills, phaseAgents, or phaseLevel
@@ -132,6 +133,7 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 		cat:            cat,
 		folded:         map[*plugin.Category]bool{},
 		checked:        map[string]bool{},
+		skillUnfolded:  map[string]bool{},
 		viewportHeight: defaultViewportHeight,
 		search:         textinput.New(),
 		phase:          phaseSkills,
@@ -576,8 +578,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ensureCursorVisible()
 			}
 		} else {
-			m.cursor = m.findParentHeader(m.cursor)
-			m.ensureCursorVisible()
+			if len([]rune(r.skill.Description)) > 60 {
+				m.skillUnfolded[r.skill.Path] = true
+			} else {
+				m.cursor = m.findParentHeader(m.cursor)
+				m.ensureCursorVisible()
+			}
 		}
 	case tea.KeyLeft:
 		r := m.rows[m.cursor]
@@ -588,8 +594,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ensureCursorVisible()
 			}
 		} else {
-			m.cursor = m.findParentHeader(m.cursor)
-			m.ensureCursorVisible()
+			if m.skillUnfolded[r.skill.Path] {
+				delete(m.skillUnfolded, r.skill.Path)
+			} else {
+				m.cursor = m.findParentHeader(m.cursor)
+				m.ensureCursorVisible()
+			}
 		}
 	}
 	return m, nil
@@ -745,12 +755,29 @@ func (m Model) View() string {
 		if m.checked[r.skill.Path] {
 			box = checkedStyle.Render(glyphChecked)
 		}
-		// Description shown after skill name with em-dash; hidden when empty.
 		var desc string
+		isLong := len([]rune(r.skill.Description)) > 60
+		unfolded := isLong && m.skillUnfolded[r.skill.Path]
+
 		if r.skill.Description != "" {
-			desc = " — " + r.skill.Description
+			if isLong {
+				if !unfolded {
+					desc = " — " + truncateRune(r.skill.Description, 60)
+				}
+			} else {
+				desc = " — " + r.skill.Description
+			}
 		}
+
 		b.WriteString(fmt.Sprintf("%s%s%s %s%s\n", indent, cursor, box, r.skill.Name, desc))
+
+		if unfolded {
+			wrappedLines := wrapText(r.skill.Description, 80)
+			descIndent := indent + "      "
+			for _, line := range wrappedLines {
+				b.WriteString(fmt.Sprintf("%s%s\n", descIndent, skillDescStyle.Render(line)))
+			}
+		}
 	}
 
 	remaining := len(m.rows) - end
@@ -874,4 +901,38 @@ func Run(cat *plugin.Catalog, agents []agent.Agent, global bool) (agent.Selectio
 		return agent.Selection{}, fmt.Errorf("tui: unexpected final model type %T", final)
 	}
 	return fm.Selection(), nil
+}
+
+func truncateRune(line string, maxChars int) string {
+	if n := len([]rune(line)); n > maxChars {
+		runes := []rune(line)[:maxChars]
+		return strings.TrimRight(string(runes), " ") + "..."
+	}
+	return line
+}
+
+func wrapText(text string, width int) []string {
+	if width <= 0 {
+		return []string{text}
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return nil
+	}
+	var lines []string
+	var currentLine string
+	for _, word := range words {
+		if currentLine == "" {
+			currentLine = word
+		} else if len(currentLine)+1+len(word) <= width {
+			currentLine += " " + word
+		} else {
+			lines = append(lines, currentLine)
+			currentLine = word
+		}
+	}
+	if currentLine != "" {
+		lines = append(lines, currentLine)
+	}
+	return lines
 }

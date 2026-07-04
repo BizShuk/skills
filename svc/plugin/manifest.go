@@ -356,17 +356,42 @@ func readDescription(path string) string {
 			}
 		}
 		// Search for description: in the frontmatter lines
-		for _, fmLine := range fmLines {
+		for j, fmLine := range fmLines {
 			fmLineTrim := strings.TrimSpace(fmLine)
 			if strings.HasPrefix(strings.ToLower(fmLineTrim), "description:") {
-				desc := strings.TrimSpace(strings.TrimPrefix(fmLineTrim, fmLineTrim[:12]))
+				val := strings.TrimSpace(strings.TrimPrefix(fmLineTrim, fmLineTrim[:12]))
+				var descLines []string
+				isFoldedOrLiteral := val == ">" || val == "|" || val == ">-" || val == "|-"
+				if isFoldedOrLiteral || val == "" {
+					for k := j + 1; k < len(fmLines); k++ {
+						nextVal := fmLines[k]
+						if strings.TrimSpace(nextVal) == "" {
+							descLines = append(descLines, "")
+							continue
+						}
+						if strings.HasPrefix(nextVal, " ") || strings.HasPrefix(nextVal, "\t") {
+							descLines = append(descLines, strings.TrimSpace(nextVal))
+						} else {
+							break
+						}
+					}
+				} else {
+					descLines = append(descLines, val)
+				}
+
+				desc := strings.Join(descLines, " ")
+				for strings.Contains(desc, "  ") {
+					desc = strings.ReplaceAll(desc, "  ", " ")
+				}
+				desc = strings.TrimSpace(desc)
+
 				if len(desc) >= 2 {
 					if (desc[0] == '"' && desc[len(desc)-1] == '"') || (desc[0] == '\'' && desc[len(desc)-1] == '\'') {
 						desc = desc[1 : len(desc)-1]
 					}
 				}
 				if desc != "" {
-					return truncateRune(desc, descMaxChars)
+					return desc
 				}
 			}
 		}
@@ -395,17 +420,9 @@ func readDescription(path string) string {
 		if line == "---" || line == "===" {
 			continue
 		}
-		return truncateRune(line, descMaxChars)
+		return line
 	}
 	return ""
-}
-
-func truncateRune(line string, maxChars int) string {
-	if n := len([]rune(line)); n > maxChars {
-		runes := []rune(line)[:maxChars]
-		return strings.TrimRight(string(runes), " ") + "..."
-	}
-	return line
 }
 
 
