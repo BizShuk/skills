@@ -31,6 +31,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bizshuk/skills/svc/discover"
 	"github.com/bizshuk/skills/svc/install"
@@ -40,6 +41,17 @@ import (
 // the TUI shows at once. The actual value can be raised or lowered on
 // the Model by tests or a future WindowSizeMsg handler.
 const defaultViewportHeight = 20
+
+// Style constants — lipgloss renders ANSI color codes; raw output stays legible
+// in terminals without ANSI support.
+var (
+	pluginHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("Cyan")).Bold(true)
+	nestedHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("Green")).Bold(true)
+	fetchErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("Red"))
+	skillNameStyle     = lipgloss.NewStyle()
+	skillDescStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+)
+
 
 // row is one visible line in the rendered tree. Headers and skills share
 // a row shape so the cursor / scroll logic can treat them uniformly; the
