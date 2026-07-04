@@ -1,90 +1,68 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "go install",
-      "type": "shell",
-      "command": "go install .",
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "problemMatcher": [
-        "$go"
-      ],
-      "options": {
-        "env": {
-          "GOBIN": "${env:GOBIN}"
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "go install",
+            "type": "shell",
+            "command": "go install .",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$go"],
+            "options": {
+                "env": {
+                    "GOBIN": "${env:GOBIN}"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true,
+                "close": true
+            },
+            "detail": "Build and install the skills binary into $(GOBIN) (default $HOME/go/bin)."
+        },
+        {
+            "label": "go build",
+            "type": "shell",
+            "command": "go build -o bin/skills .",
+            "group": "build",
+            "problemMatcher": ["$go"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "detail": "Build the skills binary to ./bin/skills (no $GOBIN required)."
+        },
+        {
+            "label": "go test",
+            "type": "shell",
+            "command": "go test ./...",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": ["$go"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": false
+            },
+            "detail": "Run all Go tests in this module."
+        },
+        {
+            "label": "go vet",
+            "type": "shell",
+            "command": "go vet ./...",
+            "problemMatcher": ["$go"],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "detail": "Run go vet across all packages."
         }
-      },
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      },
-      "detail": "Build and install the skills binary into $(GOBIN) (default $HOME/go/bin)."
-    },
-    {
-      "label": "go build",
-      "type": "shell",
-      "command": "go build -o bin/skills .",
-      "group": "build",
-      "problemMatcher": [
-        "$go"
-      ],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      },
-      "detail": "Build the skills binary to ./bin/skills (no $GOBIN required)."
-    },
-    {
-      "label": "go test",
-      "type": "shell",
-      "command": "go test ./...",
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      },
-      "problemMatcher": [
-        "$go"
-      ],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": false
-      },
-      "detail": "Run all Go tests in this module."
-    },
-    {
-      "label": "go vet",
-      "type": "shell",
-      "command": "go vet ./...",
-      "problemMatcher": [
-        "$go"
-      ],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      },
-      "detail": "Run go vet across all packages."
-    },
-    {
-      "label": "make install (default Makefile goal)",
-      "type": "shell",
-      "command": "make install",
-      "dependsOn": [],
-      "problemMatcher": [
-        "$go"
-      ],
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared",
-        "clear": true
-      },
-      "detail": "Run the Makefile's default goal (go install .) — equivalent to 'go install' but routes through the project Makefile."
-    }
-  ]
+    ]
 }

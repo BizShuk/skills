@@ -1,14 +1,14 @@
-// Package fetch materializes a source.ParsedSource into a local directory on
-// disk. The Fetcher interface is the single entry point: hand it a parsed
-// source and it returns a path the rest of the pipeline (discover, install)
-// can read skills and manifest files from.
+// fetch.go materializes a ParsedSource into a local directory on disk.
+// The Fetcher interface is the single entry point: hand it a parsed source
+// and it returns a path the rest of the pipeline (Walk, agent install) can
+// read skills and manifest files from.
 //
 // Local sources are returned in place; GitHub sources are downloaded as a
 // gzipped tarball from codeload.github.com and extracted into a fresh
 // tempdir. The leading "<repo>-<ref>/" component of every archive entry is
 // stripped so the returned directory IS the repo root, not a nested
 // "<repo>-<ref>" wrapper.
-package fetch
+package plugin
 
 import (
 	"archive/tar"
@@ -23,8 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/bizshuk/skills/svc/source"
 )
 
 // maxAttempts is the total number of times we try a GitHub download before
@@ -36,7 +34,7 @@ const maxAttempts = 5
 // Fetcher turns a parsed source into a local directory path. Implementations
 // are expected to be safe for concurrent use by multiple goroutines.
 type Fetcher interface {
-	Materialize(ctx context.Context, s source.ParsedSource) (string, error)
+	Materialize(ctx context.Context, s ParsedSource) (string, error)
 }
 
 // New returns a production Fetcher backed by net/http. Tests in other
@@ -58,11 +56,11 @@ type httpFetcher struct {
 // Materialize dispatches on the source type. Unknown types are rejected
 // with an error rather than silently succeeding, since the rest of the
 // pipeline assumes a non-empty directory.
-func (f *httpFetcher) Materialize(ctx context.Context, s source.ParsedSource) (string, error) {
+func (f *httpFetcher) Materialize(ctx context.Context, s ParsedSource) (string, error) {
 	switch s.Type {
-	case source.Local:
+	case Local:
 		return materializeLocal(s)
-	case source.GitHub:
+	case GitHub:
 		return f.materializeGitHub(ctx, s)
 	default:
 		return "", fmt.Errorf("fetch: unsupported source type for %q", s.URL)
@@ -72,7 +70,7 @@ func (f *httpFetcher) Materialize(ctx context.Context, s source.ParsedSource) (s
 // materializeLocal returns s.LocalPath as-is, but only if it points to a
 // real directory. A missing path produces the exact error message
 // "local path not found: <path>" so callers (and tests) can match on it.
-func materializeLocal(s source.ParsedSource) (string, error) {
+func materializeLocal(s ParsedSource) (string, error) {
 	if s.LocalPath == "" {
 		return "", fmt.Errorf("local path not found: <empty>")
 	}
@@ -93,7 +91,7 @@ func materializeLocal(s source.ParsedSource) (string, error) {
 // downloads and extracts the tarball with up to maxAttempts retries on
 // transient errors. The final error (if any) is wrapped with the
 // "unable to fetch <owner>/<repo>" prefix the design spec requires.
-func (f *httpFetcher) materializeGitHub(ctx context.Context, s source.ParsedSource) (string, error) {
+func (f *httpFetcher) materializeGitHub(ctx context.Context, s ParsedSource) (string, error) {
 	owner, repo, err := parseGitHubOwnerRepo(s.URL)
 	if err != nil {
 		return "", err

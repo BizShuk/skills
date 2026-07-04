@@ -1,7 +1,6 @@
-// Package manifest scans .claude-plugin/marketplace.json and
-// .claude-plugin/plugin.json to produce a Parsed view of the local plugins
-// (with their Skills) and remote plugins (to be fetched by other layers).
-package manifest
+// types.go declares the manifest value types (Skill, LocalPlugin,
+// RemotePlugin, Parsed) produced by Scan and consumed by Walk.
+package plugin
 
 // Skill is a single skill directory within a local plugin. The directory
 // must contain a SKILL.md file to be recognized.

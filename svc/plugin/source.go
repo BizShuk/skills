@@ -1,6 +1,6 @@
-// Package source parses a user-supplied source string (owner/repo,
-// git URL, local path, well-known URL) into a normalized ParsedSource.
-package source
+// source.go parses a user-supplied source string (owner/repo, git URL,
+// local path, well-known URL) into a normalized ParsedSource.
+package plugin
 
 import (
 	"fmt"

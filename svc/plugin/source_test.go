@@ -1,4 +1,4 @@
-package source
+package plugin
 
 import (
 	"path/filepath"

@@ -1,4 +1,4 @@
-package discover
+package plugin
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bizshuk/skills/svc/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,8 +15,8 @@ import (
 // repos fall through to os.ErrNotExist so the caller observes a fetch failure.
 type fakeFetcher struct{ repos map[string]string }
 
-func (f fakeFetcher) Materialize(_ context.Context, s source.ParsedSource) (string, error) {
-	if s.Type == source.Local {
+func (f fakeFetcher) Materialize(_ context.Context, s ParsedSource) (string, error) {
+	if s.Type == Local {
 		return s.LocalPath, nil
 	}
 	for or, dir := range f.repos {
@@ -87,7 +86,7 @@ func TestWalk_LocalOnlyWalk(t *testing.T) {
 	cat, err := Walk(
 		context.Background(),
 		fakeFetcher{},
-		source.ParsedSource{Type: source.Local, LocalPath: root},
+		ParsedSource{Type: Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -119,7 +118,7 @@ func TestWalk_RemoteUnreachable(t *testing.T) {
 	cat, err := Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{}},
-		source.ParsedSource{Type: source.Local, LocalPath: root},
+		ParsedSource{Type: Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -161,7 +160,7 @@ func TestWalk_DepthLimitStops(t *testing.T) {
 	cat, err := Walk(
 		context.Background(),
 		ff,
-		source.ParsedSource{Type: source.Local, LocalPath: root},
+		ParsedSource{Type: Local, LocalPath: root},
 		1,
 	)
 	require.NoError(t, err)
@@ -210,7 +209,7 @@ func TestWalk_NestedRemotePluginAppearsAsChild(t *testing.T) {
 	cat, err := Walk(
 		context.Background(),
 		ff,
-		source.ParsedSource{Type: source.Local, LocalPath: root},
+		ParsedSource{Type: Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)

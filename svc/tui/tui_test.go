@@ -2,10 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/bizshuk/skills/svc/discover"
+	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/svc/plugin"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,13 +20,13 @@ import (
 // the tree shape, "docs" is at the root, "remote" is a sibling root
 // (failed fetch) — they don't nest because both are reached from the
 // walk's root, not from each other.
-func sampleCatalog() *discover.Catalog {
-	return &discover.Catalog{
-		Roots: []*discover.Category{
+func sampleCatalog() *plugin.Catalog {
+	return &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "docs",
 				FetchOK:    true,
-				Skills: []discover.Skill{
+				Skills: []plugin.Skill{
 					{Name: "writer", Path: "/x/writer"},
 				},
 			},
@@ -40,13 +43,13 @@ func sampleCatalog() *discover.Catalog {
 // actually advances the cursor past the header: Space on a header
 // toggles both skills, but Space on the second skill row toggles only
 // that skill.
-func twoSkillCatalog() *discover.Catalog {
-	return &discover.Catalog{
-		Roots: []*discover.Category{
+func twoSkillCatalog() *plugin.Catalog {
+	return &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "docs",
 				FetchOK:    true,
-				Skills: []discover.Skill{
+				Skills: []plugin.Skill{
 					{Name: "writer", Path: "/x/writer"},
 					{Name: "reader", Path: "/x/reader"},
 				},
@@ -59,17 +62,17 @@ func twoSkillCatalog() *discover.Catalog {
 // one skill "helper". Used by fold tests — expanded View should show
 // outer header + inner header + helper (3 rows); folded should collapse
 // to just the outer header (1 row).
-func oneNestedCatalog() *discover.Catalog {
-	return &discover.Catalog{
-		Roots: []*discover.Category{
+func oneNestedCatalog() *plugin.Catalog {
+	return &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "outer",
 				FetchOK:    true,
-				Children: []*discover.Category{
+				Children: []*plugin.Category{
 					{
 						PluginName: "inner",
 						FetchOK:    true,
-						Skills:     []discover.Skill{{Name: "helper", Path: "/p/helper"}},
+						Skills:     []plugin.Skill{{Name: "helper", Path: "/p/helper"}},
 					},
 				},
 			},
@@ -86,54 +89,52 @@ func mustModel(t *testing.T, mi tea.Model) Model {
 	return m
 }
 
-func TestNewModelAllChecked(t *testing.T) {
-	m := NewModel(sampleCatalog())
+func TestNewModelNoneCheckedByDefault(t *testing.T) {
+	m := NewModel(sampleCatalog(), nil)
 	sel := m.Selection()
-	require.Len(t, sel.SkillPaths, 1, "only the docs/writer skill is discoverable; remote plugin has no skills")
-	assert.Equal(t, "/x/writer", sel.SkillPaths[0])
+	assert.Empty(t, sel.SkillPaths, "all skills start unchecked; user must opt-in with space")
 }
 
-// TestSpaceTogglesRow: with cursor on row 0 (the docs header), Space
-// recursively toggles every descendant skill. There's exactly one
-// descendant skill in this catalog, so toggling the header leaves the
-// selection empty.
-func TestSpaceTogglesRow(t *testing.T) {
-	m := NewModel(sampleCatalog())
+// TestSpaceOnHeaderChecksAllDescendants: with cursor on row 0 (the docs
+// header), Space recursively toggles every descendant skill. With
+// unchecked-by-default, Space CHECKS all skills.
+func TestSpaceOnHeaderChecksAllDescendants(t *testing.T) {
+	m := NewModel(sampleCatalog(), nil)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m2 := mustModel(t, updated)
-	assert.Empty(t, m2.Selection().SkillPaths, "toggling the header flips the only descendant skill off")
+	sel := m2.Selection().SkillPaths
+	require.Len(t, sel, 1, "Space on header checks the only descendant skill")
+	assert.Equal(t, "/x/writer", sel[0])
 }
 
 func TestViewIncludesUnableToFetch(t *testing.T) {
-	m := NewModel(sampleCatalog())
+	m := NewModel(sampleCatalog(), nil)
 	view := m.View()
 	assert.Contains(t, view, "unable to fetch", "the failed plugin should announce its fetch failure in the rendered tree")
 }
 
 // TestDownMovesCursor: the cursor starts on row 0 (the docs header).
-// Down moves to row 1 (writer). Space on a skill row toggles only that
-// skill — the header on row 0 is not affected, so reader (row 2) stays
-// checked and only reader ends up in Selection.
+// Down moves to row 1 (writer), then row 2 (reader). Space on a skill
+// row CHECKS it (default-unchecked → opt-in). Header is not affected.
 func TestDownMovesCursor(t *testing.T) {
-	m := NewModel(twoSkillCatalog())
+	m := NewModel(twoSkillCatalog(), nil)
 
-	// Sanity: cursor begins on the header, not a skill. Toggle the header
-	// would flip both; we want to prove row-by-row granularity.
-	assert.Equal(t, 0, m.cursor)
-	require.GreaterOrEqual(t, len(m.rows), 3, "twoSkillCatalog should produce header + 2 skill rows")
-
-	// Down twice: 0 (header) -> 1 (writer) -> 2 (reader), then up once.
 	m2 := mustModel(t, sendKey(m, tea.KeyDown))
 	m3 := mustModel(t, sendKey(m2, tea.KeyDown))
 	m4 := mustModel(t, sendKey(m3, tea.KeyUp))
 	require.Equal(t, 1, m4.cursor, "Down twice then Up once should land on row 1 (writer)")
 
-	// Space on row 1: toggles just writer (a skill, not a header).
-	toggled := mustModel(t, sendKey(m4, tea.KeySpace))
+	// Space on row 1 (writer): checks it since default is unchecked.
+	writerChecked := mustModel(t, sendKey(m4, tea.KeySpace))
 
-	got := toggled.Selection().SkillPaths
-	require.Len(t, got, 1, "after toggling row 1, only row 2 (reader) should remain selected")
-	assert.Equal(t, "/x/reader", got[0], "writer (row 1) must be off; reader (row 2) must still be on")
+	// Down to reader (row 2) then Space to check it.
+	m5 := mustModel(t, sendKey(writerChecked, tea.KeyDown))
+	readerChecked := mustModel(t, sendKey(m5, tea.KeySpace))
+
+	got := readerChecked.Selection().SkillPaths
+	require.Len(t, got, 2, "both skills are now checked via individual Space presses")
+	assert.Contains(t, got, "/x/writer")
+	assert.Contains(t, got, "/x/reader")
 }
 
 // sendKey feeds a synthesized keypress through Update and unwraps the
@@ -144,34 +145,33 @@ func sendKey(m Model, k tea.KeyType) tea.Model {
 	return out
 }
 
-// TestSpaceOnCategoryHeaderTogglesAllDescendantSkills verifies the new
-// "Space on a header toggles the whole subtree" behavior: one category
-// with two skills, cursor on row 0 (the header), Space flips both
-// skills off; another Space flips them both back on.
-func TestSpaceOnCategoryHeaderTogglesAllDescendantSkills(t *testing.T) {
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+// TestSpaceOnCategoryHeaderChecksAllDescendants: one category with two
+// skills, cursor on row 0 (the header). Space checks all descendant
+// skills (unchecked-by-default). Second Space unchecks them all.
+func TestSpaceOnCategoryHeaderChecksAllDescendants(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "docs",
 				FetchOK:    true,
-				Skills: []discover.Skill{
+				Skills: []plugin.Skill{
 					{Name: "writer", Path: "/x/writer"},
 					{Name: "reader", Path: "/x/reader"},
 				},
 			},
 		},
 	}
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	require.Equal(t, 0, m.cursor, "cursor should land on the first header")
 
-	// First Space: both skills flip from checked → unchecked.
+	// First Space: both skills flip from unchecked → checked.
 	m1 := mustModel(t, sendKey(m, tea.KeySpace))
-	assert.Empty(t, m1.Selection().SkillPaths, "header Space should clear all descendant skills")
+	sel1 := m1.Selection().SkillPaths
+	require.Len(t, sel1, 2, "header Space should check all descendant skills")
 
-	// Second Space: both skills flip back.
+	// Second Space: both skills flip back to unchecked.
 	m2 := mustModel(t, sendKey(m1, tea.KeySpace))
-	sel := m2.Selection().SkillPaths
-	assert.Len(t, sel, 2, "header Space again should recheck every descendant skill")
+	assert.Empty(t, m2.Selection().SkillPaths, "second header Space should uncheck all descendant skills")
 }
 
 // TestRightArrowExpandsAndLeftFolds walks the user through the fold
@@ -185,7 +185,7 @@ func TestSpaceOnCategoryHeaderTogglesAllDescendantSkills(t *testing.T) {
 //	step 3: Left on inner  → 2 rows (helper re-hidden)
 func TestRightArrowExpandsAndLeftFolds(t *testing.T) {
 	cat := oneNestedCatalog()
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	require.Equal(t, 2, len(m.rows), "outer + inner headers, inner folded")
 
 	mDown := mustModel(t, sendKey(m, tea.KeyDown))
@@ -198,33 +198,35 @@ func TestRightArrowExpandsAndLeftFolds(t *testing.T) {
 	require.Equal(t, 2, len(reFolded.rows), "Left on inner header should re-hide its helper skill")
 }
 
-// TestSpaceOnCategoryHeaderTogglesNestedSubtree verifies that the
+// TestSpaceOnCategoryHeaderChecksNestedSubtree verifies that the
 // "header Space" recursion descends past intermediate headers into
 // nested subtrees: root "outer" with one skill + one child "inner"
-// with one skill; Space on the root header flips BOTH skills off.
-func TestSpaceOnCategoryHeaderTogglesNestedSubtree(t *testing.T) {
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+// with one skill; Space on the root header checks BOTH skills.
+func TestSpaceOnCategoryHeaderChecksNestedSubtree(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "outer",
 				FetchOK:    true,
-				Skills:     []discover.Skill{{Name: "root-skill", Path: "/p/root"}},
-				Children: []*discover.Category{
+				Skills:     []plugin.Skill{{Name: "root-skill", Path: "/p/root"}},
+				Children: []*plugin.Category{
 					{
 						PluginName: "inner",
 						FetchOK:    true,
-						Skills:     []discover.Skill{{Name: "nested-skill", Path: "/p/nested"}},
+						Skills:     []plugin.Skill{{Name: "nested-skill", Path: "/p/nested"}},
 					},
 				},
 			},
 		},
 	}
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	require.Equal(t, 0, m.cursor, "cursor must be on the outermost header")
 
 	m1 := mustModel(t, sendKey(m, tea.KeySpace))
 	sel := m1.Selection().SkillPaths
-	assert.Empty(t, sel, "Space on root header should clear both root and nested subtree skills")
+	require.Len(t, sel, 2, "Space on root header should check both root and nested subtree skills")
+	assert.Contains(t, sel, "/p/root")
+	assert.Contains(t, sel, "/p/nested")
 }
 
 // TestNewModelFoldsNestedSubPluginsByDefault locks in the default-view
@@ -240,7 +242,7 @@ func TestSpaceOnCategoryHeaderTogglesNestedSubtree(t *testing.T) {
 //     and Right-arrowed). Asserted via presence of "inner" in the View.
 func TestNewModelFoldsNestedSubPluginsByDefault(t *testing.T) {
 	cat := oneNestedCatalog()
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 
 	require.GreaterOrEqual(t, len(m.rows), 2, "Roots + nested sub-plugin header should both be visible (folded but reachable)")
 
@@ -259,70 +261,68 @@ func typeRune(m Model, r rune) tea.Model {
 	return out
 }
 
-// TestSearchFiltersRows: a 3-plugin catalog where only skill B matches
-// a search for "b". The non-B plugins disappear entirely (the alpha
-// header survives because its child "B" matches; the beta and gamma
-// headers have no matching descendants and so are dropped).
+// TestSearchFiltersRows: a 3-plugin catalog where only the skill "zulu"
+// matches a search for "z". Alpha survives as the skill's container;
+// beta and gamma disappear entirely.
 func TestSearchFiltersRows(t *testing.T) {
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "alpha",
 				FetchOK:    true,
-				Skills: []discover.Skill{
-					{Name: "A", Path: "/x/a"},
-					{Name: "B", Path: "/x/b"},
+				Skills: []plugin.Skill{
+					{Name: "apple", Path: "/x/apple"},
+					{Name: "zulu", Path: "/x/zulu"},
 				},
 			},
 			{
 				PluginName: "beta",
 				FetchOK:    true,
-				Skills:     []discover.Skill{{Name: "C", Path: "/x/c"}},
+				Skills:     []plugin.Skill{{Name: "charlie", Path: "/x/charlie"}},
 			},
 			{
 				PluginName: "gamma",
 				FetchOK:    true,
-				Skills:     []discover.Skill{{Name: "D", Path: "/x/d"}},
+				Skills:     []plugin.Skill{{Name: "delta", Path: "/x/delta"}},
 			},
 		},
 	}
-	m := NewModel(cat)
-	filtered := mustModel(t, typeRune(m, 'b')) // type "b"
-	require.GreaterOrEqual(t, len(filtered.rows), 2, "filtered view retains alpha header + skill B")
+	m := NewModel(cat, nil)
+	filtered := mustModel(t, typeRune(m, 'z')) // type "z" — matches only zulu skill
+	require.GreaterOrEqual(t, len(filtered.rows), 2, "filtered view retains alpha header + zulu skill")
 	// Cursor pinned at 0 after the row set shrinks (rebuildVisible clamps).
 	assert.Equal(t, 0, filtered.cursor)
 
 	view := filtered.View()
-	assert.Contains(t, view, "B ", "skill B is visible")
-	// Each filtered-out skill appears only on its own row; absence of
-	// the standalone letter surrounded by spaces is direct evidence.
-	assert.NotContains(t, view, " A ", "skill A row absent from filtered view")
-	assert.NotContains(t, view, " C ", "skill C row absent from filtered view")
-	assert.NotContains(t, view, " D ", "skill D row absent from filtered view")
-	// The header for the plugin containing matching skill B stays.
-	assert.Contains(t, view, "alpha", "header for the plugin containing matching skill B remains visible")
-	// Plugins with no matching descendants disappear entirely.
-	assert.NotContains(t, view, "beta ", "beta header has no matching descendants, must be hidden")
-	assert.NotContains(t, view, "gamma ", "gamma header has no matching descendants, must be hidden")
+	assert.Contains(t, view, "○ zulu", "zulu skill is visible")
+	// No other skill checkbox rows appear.
+	assert.NotContains(t, view, "○ apple", "apple row absent from filtered view")
+	assert.NotContains(t, view, "○ charlie", "charlie row absent from filtered view")
+	assert.NotContains(t, view, "○ delta", "delta row absent from filtered view")
+	// Alpha header stays as the skill's container.
+	assert.Contains(t, view, "alpha", "alpha header remains because it contains the matching zulu skill")
+	// Beta and gamma have no matching descendants and no matching name.
+	assert.NotContains(t, view, "beta", "beta header has no 'z' match and must be hidden")
+	assert.NotContains(t, view, "gamma", "gamma header has no 'z' match and must be hidden")
 }
 
 // TestSearchClearsOnEsc: typing something makes the row set shrink;
 // Esc with a non-empty search clears the search rather than quitting,
 // and the full row set reappears.
 func TestSearchClearsOnEsc(t *testing.T) {
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []discover.Skill{
+				Skills: []plugin.Skill{
 					{Name: "alpha", Path: "/x/alpha"},
 					{Name: "beta", Path: "/x/beta"},
 				},
 			},
 		},
 	}
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	fullView := m.View()
 	assert.Contains(t, fullView, "alpha")
 	assert.Contains(t, fullView, "beta")
@@ -353,12 +353,12 @@ func TestSearchClearsOnEsc(t *testing.T) {
 // of visible rows, View shows only that many body rows and appends a
 // `↓ N more` footer for the remainder.
 func TestViewportClipsToHeight(t *testing.T) {
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []discover.Skill{
+				Skills: []plugin.Skill{
 					{Name: "s1", Path: "/x/s1"},
 					{Name: "s2", Path: "/x/s2"},
 					{Name: "s3", Path: "/x/s3"},
@@ -368,7 +368,7 @@ func TestViewportClipsToHeight(t *testing.T) {
 			},
 		},
 	}
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	require.Equal(t, 6, len(m.rows), "header + 5 skills")
 
 	m.viewportHeight = 3
@@ -389,12 +389,12 @@ func TestViewportClipsToHeight(t *testing.T) {
 // tested in the manifest package — the TUI just renders whatever it
 // receives.
 func TestDescriptionRendered(t *testing.T) {
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []discover.Skill{
+				Skills: []plugin.Skill{
 					{Name: "shorty", Path: "/x/shorty",
 						Description: "Use when fooing the bar"},
 					{Name: "emptyy", Path: "/x/emptyy",
@@ -403,13 +403,13 @@ func TestDescriptionRendered(t *testing.T) {
 			},
 		},
 	}
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	view := m.View()
 
-	assert.Contains(t, view, "shorty (Use when fooing the bar)",
-		"description rendered verbatim inside parens after the name")
-	assert.Contains(t, view, "emptyy ()",
-		"missing description renders as empty parens for visual rhythm")
+	assert.Contains(t, view, "shorty — Use when fooing the bar",
+		"description rendered after em-dash following the skill name")
+	assert.NotContains(t, view, "emptyy —",
+		"missing description omits the em-dash separator entirely")
 }
 
 // TestCursorStaysVisible: when the cursor moves below the viewport, the
@@ -418,15 +418,15 @@ func TestDescriptionRendered(t *testing.T) {
 func TestCursorStaysVisible(t *testing.T) {
 	// Build a 12-row catalog so several steps past viewportHeight (3)
 	// still have rows to scroll into.
-	cat := &discover.Catalog{
-		Roots: []*discover.Category{
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: func() []discover.Skill {
-					out := make([]discover.Skill, 11)
+				Skills: func() []plugin.Skill {
+					out := make([]plugin.Skill, 11)
 					for i := range out {
-						out[i] = discover.Skill{
+						out[i] = plugin.Skill{
 							Name:        fmt.Sprintf("s%02d", i+1),
 							Path:        fmt.Sprintf("/x/s%02d", i+1),
 							Description: ".",
@@ -437,7 +437,7 @@ func TestCursorStaysVisible(t *testing.T) {
 			},
 		},
 	}
-	m := NewModel(cat)
+	m := NewModel(cat, nil)
 	m.viewportHeight = 3
 	require.Equal(t, 12, len(m.rows)) // header + 11 skills
 
@@ -462,11 +462,172 @@ func TestCursorStaysVisible(t *testing.T) {
 		if strings.HasPrefix(strings.TrimSpace(ln), "↓") {
 			continue
 		}
-		if strings.Contains(ln, "> ● s08") {
+		if strings.Contains(ln, "> ○ s08") {
 			focused = ln
 			break
 		}
 	}
 	require.NotEmpty(t, focused,
-		"a body line containing '> ● s08' must appear (cursor row should be in view); view=\n%s", view)
+		"a body line containing '> ○ s08' must appear (cursor row should be in view); view=\n%s", view)
 }
+
+// twoAgents is a small fixture for the agent- and level-phase tests that
+// don't care about checked/detected state (phase-transition and level
+// tests). makeAgents computes checked/detected via agent.Detect() against
+// the real $HOME rather than these DetectDir values, so tests that DO care
+// about checked state must control $HOME themselves (see
+// TestAgentPhaseSpaceTogglesAgent).
+func twoAgents() []agent.Agent {
+	return []agent.Agent{
+		{Type: "claude-code", DisplayName: "Claude Code", DetectDir: "/home/user/.claude"},
+		{Type: "codex", DisplayName: "Codex", DetectDir: ""},
+	}
+}
+
+// TestEnterAdvancesThroughAllThreePhases is the core regression test for the
+// wizard flow: Enter on the skills screen must move to the agent screen,
+// Enter there must move to the level screen, and only Enter on the level
+// screen actually quits the program. Before this test existed, Enter quit
+// immediately from every phase because the transition was never wired up.
+func TestEnterAdvancesThroughAllThreePhases(t *testing.T) {
+	m := NewModel(sampleCatalog(), twoAgents())
+	require.Equal(t, phaseSkills, m.phase)
+
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))
+	assert.Equal(t, phaseAgents, m1.phase, "Enter on skills phase must advance to agent phase, not quit")
+
+	m2, cmd2 := m1.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2m := mustModel(t, m2)
+	assert.Equal(t, phaseLevel, m2m.phase, "Enter on agent phase must advance to level phase, not quit")
+	assert.Nil(t, cmd2, "advancing phases must not quit the program")
+
+	_, cmd3 := m2m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.NotNil(t, cmd3, "Enter on the level phase must finally quit the program")
+}
+
+// TestEscStepsBackThroughPhases verifies Esc is the inverse of Enter: from
+// the level phase it returns to the agent phase, and from the agent phase
+// it returns to the skills phase, without quitting or losing state.
+func TestEscStepsBackThroughPhases(t *testing.T) {
+	m := NewModel(sampleCatalog(), twoAgents())
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter)) // -> phaseAgents
+	m2 := mustModel(t, sendKey(m1, tea.KeyEnter)) // -> phaseLevel
+	require.Equal(t, phaseLevel, m2.phase)
+
+	back1 := mustModel(t, sendKey(m2, tea.KeyEsc))
+	assert.Equal(t, phaseAgents, back1.phase, "Esc from level phase should return to agent phase")
+
+	back2 := mustModel(t, sendKey(back1, tea.KeyEsc))
+	assert.Equal(t, phaseSkills, back2.phase, "Esc from agent phase should return to skill phase")
+}
+
+// TestLevelPhaseDefaultsFromGlobalFlag verifies that entering the level
+// phase pre-highlights whichever row matches the model's current Global
+// setting (as set by Run from the caller's --global flag), so a user who
+// passed --global sees Global already highlighted rather than having to
+// navigate to it.
+func TestLevelPhaseDefaultsFromGlobalFlag(t *testing.T) {
+	m := NewModel(sampleCatalog(), twoAgents())
+	m.global = true
+
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))  // -> phaseAgents
+	m2 := mustModel(t, sendKey(m1, tea.KeyEnter)) // -> phaseLevel
+
+	assert.Equal(t, 1, m2.levelCursor, "levelCursor should default to the Global row (index 1) when m.global is true")
+}
+
+// TestLevelPhaseSpaceCommitsSelection verifies that Space in the level
+// phase sets m.global to match whichever row is highlighted, and that the
+// final Selection().Global reflects that choice.
+func TestLevelPhaseSpaceCommitsSelection(t *testing.T) {
+	m := NewModel(sampleCatalog(), twoAgents())
+	m.global = false // starts on Project
+
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))  // -> phaseAgents
+	m2 := mustModel(t, sendKey(m1, tea.KeyEnter)) // -> phaseLevel, levelCursor=0 (Project)
+	require.Equal(t, 0, m2.levelCursor)
+
+	// Move down to the Global row and commit it with Space.
+	m3 := mustModel(t, sendKey(m2, tea.KeyDown))
+	require.Equal(t, 1, m3.levelCursor, "Down should move the highlight to the Global row")
+
+	m4 := mustModel(t, sendKey(m3, tea.KeySpace))
+	assert.True(t, m4.global, "Space on the Global row should set m.global = true")
+	assert.True(t, m4.Selection().Global, "Selection().Global should reflect the committed choice")
+}
+
+// TestLevelPhaseViewShowsBothOptions verifies the level-phase View() text
+// includes both Project and Global options with the checked glyph on
+// whichever one is currently selected.
+func TestLevelPhaseViewShowsBothOptions(t *testing.T) {
+	m := NewModel(sampleCatalog(), twoAgents())
+	m.global = false
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))
+	m2 := mustModel(t, sendKey(m1, tea.KeyEnter))
+
+	view := m2.View()
+	assert.Contains(t, view, "Project", "level view must list the Project option")
+	assert.Contains(t, view, "Global", "level view must list the Global option")
+	assert.Contains(t, view, "Install at Project or Global level?", "level view must show its phase header")
+}
+
+// TestAgentPhaseSpaceTogglesAgent verifies Space in the agent phase toggles
+// the checked state of the agent under the cursor, and that state survives
+// into the final Selection().AgentTypes. $HOME is pointed at a tempdir with
+// a ~/.claude sentinel so claude-code starts genuinely detected+checked.
+func TestAgentPhaseSpaceTogglesAgent(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+	t.Setenv("HOME", home)
+
+	m := NewModel(sampleCatalog(), twoAgents())
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter)) // -> phaseAgents
+	require.Equal(t, phaseAgents, m1.phase)
+	require.True(t, m1.agents[0].checked, "claude-code should start checked: it's a default type AND its folder exists")
+	require.False(t, m1.agents[1].checked, "codex should start unchecked: not a default-checked type")
+
+	// Toggle codex on via Down + Space.
+	m2 := mustModel(t, sendKey(m1, tea.KeyDown))
+	m3 := mustModel(t, sendKey(m2, tea.KeySpace))
+
+	got := m3.Selection().AgentTypes
+	require.Len(t, got, 2, "both claude-code and codex should now be selected")
+}
+
+// TestMakeAgentsSkipsUndetectedDefaultAgent verifies that claude-code is
+// NOT pre-checked when its folder doesn't exist on disk — being one of the
+// three default-checked types isn't enough by itself; the folder must also
+// be genuinely detected.
+func TestMakeAgentsSkipsUndetectedDefaultAgent(t *testing.T) {
+	home := t.TempDir() // empty — no ~/.claude, no ~/.gemini/antigravity*
+	t.Setenv("HOME", home)
+
+	rows := makeAgents([]agent.Agent{
+		{Type: "claude-code", DisplayName: "Claude Code"},
+		{Type: "antigravity", DisplayName: "Antigravity"},
+	})
+
+	for _, r := range rows {
+		assert.False(t, r.checked, "%s should start unchecked: default type but folder not detected", r.agent.Type)
+		assert.False(t, r.detected, "%s should not be marked detected: folder doesn't exist", r.agent.Type)
+	}
+}
+
+// TestMakeAgentsSkipsNonDefaultDetectedAgent verifies that an agent OUTSIDE
+// the three default-checked types (e.g. codex) stays unchecked even when
+// its folder IS detected on disk — detection alone isn't enough; the type
+// must also be in defaultCheckedAgentTypes.
+func TestMakeAgentsSkipsNonDefaultDetectedAgent(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
+	t.Setenv("HOME", home)
+
+	rows := makeAgents([]agent.Agent{
+		{Type: "codex", DisplayName: "Codex"},
+	})
+
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].detected, "codex folder exists, so it should be marked detected")
+	assert.False(t, rows[0].checked, "codex is detected but not a default-checked type, so it must stay unchecked")
+}
+

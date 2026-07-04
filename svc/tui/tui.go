@@ -1,4 +1,4 @@
-// Package tui renders a discovered discover.Catalog as an interactive
+// Package tui renders a discovered plugin.Catalog as an interactive
 // tree and returns the user's selection. Every Category in the catalog
 // becomes one header row in the rendered tree; every Skill becomes a leaf
 // row indented under its owning category header. Pressing space on a
@@ -33,8 +33,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/bizshuk/skills/svc/discover"
-	"github.com/bizshuk/skills/svc/install"
+	"github.com/bizshuk/skills/svc/plugin"
+	"github.com/bizshuk/skills/svc/agent"
 )
 
 // defaultViewportHeight is the number of body rows (headers + skills)
@@ -45,11 +45,12 @@ const defaultViewportHeight = 20
 // Style constants — lipgloss renders ANSI color codes; raw output stays legible
 // in terminals without ANSI support.
 var (
-	pluginHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("Cyan")).Bold(true)
+	pluginHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
 	nestedHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("Green")).Bold(true)
 	fetchErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("Red"))
 	skillNameStyle     = lipgloss.NewStyle()
 	skillDescStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	checkedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("Green"))
 )
 
 
@@ -57,10 +58,24 @@ var (
 // a row shape so the cursor / scroll logic can treat them uniformly; the
 // isHeader / skill fields disambiguate.
 type row struct {
-	node     *discover.Category // non-nil for both header and skill rows
-	skill    *discover.Skill    // nil for header rows, non-nil for skill rows
+	node     *plugin.Category // non-nil for both header and skill rows
+	skill    *plugin.Skill    // nil for header rows, non-nil for skill rows
 	depth    int                // nesting depth (0 for top-level plugin headers)
 	isHeader bool               // true for category header rows, false for skill rows
+}
+
+// phase values drive which screen the TUI renders.
+const (
+	phaseSkills = iota
+	phaseAgents
+	phaseLevel
+)
+
+// agentRow is one agent line in the agent-selection phase.
+type agentRow struct {
+	agent    agent.Agent
+	checked  bool
+	detected bool // true if agent.Detect() found this agent's folder on disk
 }
 
 // Model is the bubbletea program state. Cursor, rows, fold map, search
@@ -72,7 +87,8 @@ type row struct {
 // shrink it to exercise the "↓ N more" footer without rendering a giant
 // catalog. Zero means "use defaultViewportHeight".
 type Model struct {
-	cat    *discover.Catalog
+	// Skill-phase fields.
+	cat    *plugin.Catalog
 	rows   []row // post-filter visible rows; rebuildVisible() repopulates
 	cursor int
 	offset int
@@ -84,14 +100,23 @@ type Model struct {
 
 	global  bool
 	done    bool
-	folded  map[*discover.Category]bool // fold state keyed by Category pointer
+	folded  map[*plugin.Category]bool // fold state keyed by Category pointer
 	checked map[string]bool             // checked state keyed by Skill.Path
+
+	// Agent-phase fields.
+	phase       int        // phaseSkills, phaseAgents, or phaseLevel
+	agents      []agentRow // agent list for phase 2
+	agentCursor int
+	agentOffset int
+
+	// Level-phase fields (phase 3: Project vs Global install location).
+	levelCursor int // 0 = Project row highlighted, 1 = Global row highlighted
 }
 
 // NewModel materializes the model's rows from the given catalog. Every
-// skill starts checked — the user can opt out with space — and failed
-// plugins still contribute a header row (to surface the fetch failure)
-// but no skill rows of their own.
+// skill starts unchecked — the user opts in with space. Failed plugins
+// still contribute a header row (to surface the fetch failure) but no
+// skill rows of their own.
 //
 // Fold state: only the top-level (Roots) plugins start expanded. Every
 // nested sub-plugin starts folded so the user is not overwhelmed by a
@@ -100,25 +125,26 @@ type Model struct {
 //
 // Search state: the search input starts focused and empty, so the user
 // can immediately type to filter.
-func NewModel(cat *discover.Catalog) Model {
+//
+// Agent phase: agents are shown in phase 2 with detected agents pre-checked.
+func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 	m := Model{
 		cat:            cat,
-		folded:         map[*discover.Category]bool{},
+		folded:         map[*plugin.Category]bool{},
 		checked:        map[string]bool{},
 		viewportHeight: defaultViewportHeight,
 		search:         textinput.New(),
+		phase:          phaseSkills,
+		agents:         makeAgents(agents),
 	}
 	m.search.Prompt = ""
 	m.search.Placeholder = ""
 	m.search.Focus()
-	for _, s := range cat.AllSkills() {
-		m.checked[s.Path] = true
-	}
 	// Pre-fold every nested sub-plugin. Roots stay expanded. We do this in
 	// a second pass after checked is populated so that rebuildVisible sees
 	// a stable fold state when it walks the tree.
-	var foldNested func(parent *discover.Category)
-	foldNested = func(parent *discover.Category) {
+	var foldNested func(parent *plugin.Category)
+	foldNested = func(parent *plugin.Category) {
 		for _, ch := range parent.Children {
 			m.folded[ch] = true
 			foldNested(ch)
@@ -130,6 +156,39 @@ func NewModel(cat *discover.Catalog) Model {
 	m.rebuildVisible()
 	m.ensureCursorVisible()
 	return m
+}
+
+// defaultCheckedAgentTypes are pre-checked in the agent-selection phase, but
+// only when agent.Detect() confirms their folder actually exists on disk.
+// Every other agent type — and any of these three without a detected
+// folder — starts unchecked so a first-time user isn't surprised by
+// installs into tools they don't have set up.
+var defaultCheckedAgentTypes = map[agent.AgentType]bool{
+	"claude-code":     true,
+	"antigravity":     true,
+	"antigravity-cli": true,
+}
+
+// makeAgents builds the agent row list. detected marks whether
+// agent.Detect() found this agent's folder on disk (used to render the
+// "(detected)" suffix); checked additionally requires the agent's type to
+// be one of defaultCheckedAgentTypes.
+func makeAgents(agents []agent.Agent) []agentRow {
+	detected := make(map[agent.AgentType]bool)
+	for _, d := range agent.Detect() {
+		detected[d.Type] = true
+	}
+
+	rows := make([]agentRow, len(agents))
+	for i, a := range agents {
+		isDetected := detected[a.Type]
+		rows[i] = agentRow{
+			agent:    a,
+			detected: isDetected,
+			checked:  isDetected && defaultCheckedAgentTypes[a.Type],
+		}
+	}
+	return rows
 }
 
 // rebuildVisible walks the catalog honoring both fold state and the
@@ -149,8 +208,8 @@ func (m *Model) rebuildVisible() {
 	q := strings.ToLower(strings.TrimSpace(m.searchQuery))
 
 	var out []row
-	var walk func(c *discover.Category, depth int)
-	walk = func(c *discover.Category, depth int) {
+	var walk func(c *plugin.Category, depth int)
+	walk = func(c *plugin.Category, depth int) {
 		if c == nil {
 			return
 		}
@@ -226,7 +285,7 @@ func (m *Model) rebuildVisible() {
 // skillMatchesQuery reports whether the skill's name OR description
 // contains the lower-cased trimmed query. An empty query matches every
 // skill (caller should already short-circuit).
-func skillMatchesQuery(s *discover.Skill, q string) bool {
+func skillMatchesQuery(s *plugin.Skill, q string) bool {
 	if q == "" {
 		return true
 	}
@@ -243,10 +302,10 @@ func skillMatchesQuery(s *discover.Skill, q string) bool {
 // header: true if every skill in the subtree is checked, false if none
 // are checked (or the subtree has no skills — empty → unchecked), and
 // "partial" otherwise.
-func (m Model) headerCheckState(c *discover.Category) (all bool, partial bool) {
+func (m Model) headerCheckState(c *plugin.Category) (all bool, partial bool) {
 	var total, checked int
-	var walk func(n *discover.Category)
-	walk = func(n *discover.Category) {
+	var walk func(n *plugin.Category)
+	walk = func(n *plugin.Category) {
 		if n == nil {
 			return
 		}
@@ -274,7 +333,7 @@ func (m Model) headerCheckState(c *discover.Category) (all bool, partial bool) {
 }
 
 // toggleSubtree flips the checked bit for every Skill path under c.
-func (m *Model) toggleSubtree(c *discover.Category) {
+func (m *Model) toggleSubtree(c *plugin.Category) {
 	if c == nil {
 		return
 	}
@@ -284,8 +343,8 @@ func (m *Model) toggleSubtree(c *discover.Category) {
 	// deterministic anchor.
 	all, _ := m.headerCheckState(c)
 	target := !all
-	var walk func(n *discover.Category)
-	walk = func(n *discover.Category) {
+	var walk func(n *plugin.Category)
+	walk = func(n *plugin.Category) {
 		if n == nil {
 			return
 		}
@@ -352,6 +411,9 @@ func (m Model) Init() tea.Cmd { return nil }
 // search instead of quitting, so the user can iteratively narrow; with
 // an empty field the second esc quits, matching the conventional
 // pattern.
+//
+// In the agent phase, Up/Down navigate the agent list, Space toggles
+// the agent under the cursor, and Enter confirms the selection.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -359,7 +421,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch key.Type {
+	case tea.KeyCtrlC:
+		m.done = true
+		return m, tea.Quit
 	case tea.KeyEsc:
+		switch m.phase {
+		case phaseLevel:
+			// Back to agent phase from level phase.
+			m.phase = phaseAgents
+			return m, nil
+		case phaseAgents:
+			// Back to skill phase from agent phase.
+			m.phase = phaseSkills
+			m.agentCursor = 0
+			m.agentOffset = 0
+			return m, nil
+		}
 		if m.search.Value() != "" {
 			m.search.SetValue("")
 			m.searchQuery = ""
@@ -371,9 +448,69 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.done = true
 		return m, tea.Quit
-	case tea.KeyEnter, tea.KeyCtrlC:
-		m.done = true
-		return m, tea.Quit
+	case tea.KeyEnter:
+		switch m.phase {
+		case phaseSkills:
+			// Advance to agent selection.
+			m.phase = phaseAgents
+			m.agentCursor = 0
+			m.agentOffset = 0
+			return m, nil
+		case phaseAgents:
+			// Advance to install-level selection. Pre-highlight whichever
+			// row matches the current global flag (set by NewModel/Run
+			// from the caller's --global default).
+			m.phase = phaseLevel
+			if m.global {
+				m.levelCursor = 1
+			} else {
+				m.levelCursor = 0
+			}
+			return m, nil
+		default: // phaseLevel
+			m.done = true
+			return m, tea.Quit
+		}
+	}
+
+	// Level phase: Up/Down move the highlight between Project and Global;
+	// Space commits the highlighted row as the chosen install level.
+	if m.phase == phaseLevel {
+		switch key.Type {
+		case tea.KeyUp:
+			if m.levelCursor > 0 {
+				m.levelCursor--
+			}
+		case tea.KeyDown:
+			if m.levelCursor < 1 {
+				m.levelCursor++
+			}
+		case tea.KeySpace:
+			m.global = m.levelCursor == 1
+		}
+		return m, nil
+	}
+
+	// Agent phase: Up/Down move the cursor, Space toggles the agent
+	// under the cursor.
+	if m.phase == phaseAgents {
+		switch key.Type {
+		case tea.KeyUp:
+			if m.agentCursor > 0 {
+				m.agentCursor--
+				m.ensureAgentCursorVisible()
+			}
+		case tea.KeyDown:
+			if m.agentCursor < len(m.agents)-1 {
+				m.agentCursor++
+				m.ensureAgentCursorVisible()
+			}
+		case tea.KeySpace:
+			if m.agentCursor >= 0 && m.agentCursor < len(m.agents) {
+				m.agents[m.agentCursor].checked = !m.agents[m.agentCursor].checked
+			}
+		}
+		return m, nil
 	}
 
 	// Navigation keys are NOT fed to the search input (otherwise Up/Down
@@ -455,6 +592,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// ensureAgentCursorVisible keeps the agent cursor within the visible window.
+func (m *Model) ensureAgentCursorVisible() {
+	h := m.viewportHeight
+	if h <= 0 {
+		h = defaultViewportHeight
+	}
+	if m.agentCursor < m.agentOffset {
+		m.agentOffset = m.agentCursor
+	}
+	if m.agentCursor >= m.agentOffset+h {
+		m.agentOffset = m.agentCursor - h + 1
+	}
+	maxOffset := len(m.agents) - h
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.agentOffset > maxOffset {
+		m.agentOffset = maxOffset
+	}
+	if m.agentOffset < 0 {
+		m.agentOffset = 0
+	}
+}
+
 // unableFetchMarker is the literal text we look for in tests; keep it
 // spelled exactly like this so the tests don't get fragile.
 const unableFetchMarker = "unable to fetch"
@@ -475,17 +636,24 @@ const (
 //	<body rows, clipped to viewportHeight, plus "↓ N more" if off-screen>
 //
 // Each header is `<indent>> <box> <pluginName>` (or `> …` if cursor).
-// Each skill row is `<indent>> <box> <name> (<description>)`, with the
-// description in parens (empty parens when none). Categories that failed
-// to fetch are suffixed with `  [unable to fetch]` plus the underlying
-// error when it carries info beyond the marker.
+// Each skill row is `<indent>> <box> <name> — <description>`, with the
+// em-dash and description omitted entirely when there is no description.
+// Categories that failed to fetch are suffixed with `  [unable to fetch]`
+// plus the underlying error when it carries info beyond the marker.
 func (m Model) View() string {
+	switch m.phase {
+	case phaseAgents:
+		return m.viewAgents()
+	case phaseLevel:
+		return m.viewLevel()
+	}
+
 	var b strings.Builder
 	b.WriteString("Select skills to install\n")
 	b.WriteString("Search: ")
 	b.WriteString(m.search.View())
 	b.WriteString("\n")
-	b.WriteString("↑↓ move, space select, enter confirm\n")
+	b.WriteString("↑↓ move, space select, enter next\n")
 
 	if len(m.rows) == 0 {
 		// Treat "no matches" and "empty catalog" both as a one-line hint,
@@ -535,19 +703,20 @@ func (m Model) View() string {
 					text += " (" + r.node.FetchErr + ")"
 				}
 			}
-			b.WriteString(fmt.Sprintf("%s%s%s %s\n", indent, cursor, box, text))
+			b.WriteString(fmt.Sprintf("%s%s%s %s\n", indent, cursor, box, pluginHeaderStyle.Render(text)))
 			continue
 		}
 
 		box := glyphUnchecked
 		if m.checked[r.skill.Path] {
-			box = glyphChecked
+			box = checkedStyle.Render(glyphChecked)
 		}
-		// Description in parens; the `()` placeholder matches the spec's
-		// visual rhythm when a skill has no description (rare in practice
-		// but allowed).
-		desc := "(" + r.skill.Description + ")"
-		b.WriteString(fmt.Sprintf("%s%s%s %s %s\n", indent, cursor, box, r.skill.Name, desc))
+		// Description shown after skill name with em-dash; hidden when empty.
+		var desc string
+		if r.skill.Description != "" {
+			desc = " — " + r.skill.Description
+		}
+		b.WriteString(fmt.Sprintf("%s%s%s %s%s\n", indent, cursor, box, r.skill.Name, desc))
 	}
 
 	remaining := len(m.rows) - end
@@ -558,37 +727,117 @@ func (m Model) View() string {
 }
 
 // Selection returns the paths the user kept checked, paired with the
-// current global flag. Agents is left to the caller; the TUI doesn't
-// touch agent selection in this version.
-func (m Model) Selection() install.Selection {
+// current global flag and the selected agent types.
+func (m Model) Selection() agent.Selection {
 	paths := make([]string, 0, len(m.checked))
 	for path, ok := range m.checked {
 		if ok {
 			paths = append(paths, path)
 		}
 	}
-	return install.Selection{SkillPaths: paths, Global: m.global}
+	agentTypes := make([]agent.AgentType, 0)
+	for _, a := range m.agents {
+		if a.checked {
+			agentTypes = append(agentTypes, a.agent.Type)
+		}
+	}
+	return agent.Selection{SkillPaths: paths, AgentTypes: agentTypes, Global: m.global}
+}
+
+// viewAgents renders the agent-selection phase.
+func (m Model) viewAgents() string {
+	var b strings.Builder
+	b.WriteString("Select agents to install into\n")
+	b.WriteString("↑↓ move, space select, enter next, esc back\n\n")
+
+	if len(m.agents) == 0 {
+		b.WriteString("(no agents available)\n")
+		return b.String()
+	}
+
+	h := m.viewportHeight
+	if h <= 0 {
+		h = defaultViewportHeight
+	}
+	start := m.agentOffset
+	end := start + h
+	if end > len(m.agents) {
+		end = len(m.agents)
+	}
+
+	for i := start; i < end; i++ {
+		a := m.agents[i]
+		cursor := "  "
+		if i == m.agentCursor {
+			cursor = "> "
+		}
+		box := glyphUnchecked
+		if a.checked {
+			box = checkedStyle.Render(glyphChecked)
+		}
+		text := a.agent.DisplayName
+		if a.detected {
+			text += "  (detected)"
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, box, pluginHeaderStyle.Render(text)))
+	}
+
+	remaining := len(m.agents) - end
+	if remaining > 0 {
+		b.WriteString(fmt.Sprintf("↓ %d more\n", remaining))
+	}
+	return b.String()
+}
+
+// levelOptions is the fixed two-row list rendered by viewLevel: index 0 is
+// Project (cwd-relative install dirs), index 1 is Global (user-level, under
+// $HOME). The order matters — it's what levelCursor indexes into and what
+// the "m.global = m.levelCursor == 1" assignment in Update assumes.
+var levelOptions = [2]string{
+	"Project — install into ./.claude/skills etc., relative to the current directory",
+	"Global — install into ~/.claude/skills etc., available in every project",
+}
+
+// viewLevel renders the install-level phase: a two-row radio choice between
+// Project and Global. The checked glyph marks the currently selected level
+// (m.global); the "> " cursor marks the row Up/Down last highlighted, which
+// only becomes the selection once Space commits it.
+func (m Model) viewLevel() string {
+	var b strings.Builder
+	b.WriteString("Install at Project or Global level?\n")
+	b.WriteString("↑↓ move, space select, enter confirm, esc back\n\n")
+
+	for i, label := range levelOptions {
+		cursor := "  "
+		if i == m.levelCursor {
+			cursor = "> "
+		}
+		box := glyphUnchecked
+		isGlobalRow := i == 1
+		if m.global == isGlobalRow {
+			box = checkedStyle.Render(glyphChecked)
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, box, label))
+	}
+	return b.String()
 }
 
 // Run launches the bubbletea program on a fresh Model, blocks until quit,
 // then casts the final model back to Model to extract the selection. The
-// global flag is taken from the caller (cmd's --global) and re-applied
-// to the returned Selection — this also covers the case where the user
-// aborted, in which case the model carries the default false and we
-// still honor the caller's flag.
-func Run(cat *discover.Catalog, global bool) (install.Selection, error) {
-	m := NewModel(cat)
+// global flag is taken from the caller (cmd's --global) only as the
+// initial default for the level phase — the user can change it there via
+// Space, and the final choice comes back on Selection().Global.
+func Run(cat *plugin.Catalog, agents []agent.Agent, global bool) (agent.Selection, error) {
+	m := NewModel(cat, agents)
 	m.global = global
 	p := tea.NewProgram(m)
 	final, err := p.Run()
 	if err != nil {
-		return install.Selection{}, err
+		return agent.Selection{}, err
 	}
 	fm, ok := final.(Model)
 	if !ok {
-		return install.Selection{}, fmt.Errorf("tui: unexpected final model type %T", final)
+		return agent.Selection{}, fmt.Errorf("tui: unexpected final model type %T", final)
 	}
-	sel := fm.Selection()
-	sel.Global = global
-	return sel, nil
+	return fm.Selection(), nil
 }

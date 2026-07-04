@@ -11,10 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/bizshuk/skills/svc/discover"
-	"github.com/bizshuk/skills/svc/fetch"
-	"github.com/bizshuk/skills/svc/install"
-	"github.com/bizshuk/skills/svc/source"
+	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/svc/plugin"
 	"github.com/bizshuk/skills/svc/tui"
 )
 
@@ -35,57 +33,70 @@ func Execute() error {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			src, err := source.Parse(args[0])
+			src, err := plugin.Parse(args[0])
 			if err != nil {
 				return fmt.Errorf("source: %w", err)
 			}
 
-			cat, err := discover.Walk(ctx, fetch.New(), src, depth)
+			cat, err := plugin.Walk(ctx, plugin.New(), src, depth)
 			if err != nil {
 				return fmt.Errorf("discover: %w", err)
 			}
 
-			var targets []install.Agent
-			if len(agents) > 0 {
-				table := install.Agents()
-				byName := make(map[install.AgentType]install.Agent, len(table))
+			var targets []agent.Agent
+			switch {
+			case len(agents) > 0:
+				// --agent explicitly overrides the target set, for both the
+				// TUI and --yes paths.
+				table := agent.Agents()
+				byName := make(map[agent.AgentType]agent.Agent, len(table))
 				for _, a := range table {
 					byName[a.Type] = a
 				}
 				for _, name := range agents {
-					if a, ok := byName[install.AgentType(name)]; ok {
+					if a, ok := byName[agent.AgentType(name)]; ok {
 						targets = append(targets, a)
 					}
 				}
-			} else {
-				targets = install.Detect()
+			case yes:
+				// Non-interactive: install into whatever's already detected.
+				targets = agent.Detect()
+			default:
+				// Interactive: show every known agent so the user can pick
+				// freely; the TUI's agent phase pre-checks only the agents
+				// it detects on disk (see tui.defaultCheckedAgentTypes).
+				targets = agent.Agents()
 			}
 
-			var sel install.Selection
+			var sel agent.Selection
 			if yes {
 				for _, s := range cat.AllSkills() {
 					sel.SkillPaths = append(sel.SkillPaths, s.Path)
 				}
+				for _, a := range targets {
+					sel.AgentTypes = append(sel.AgentTypes, a.Type)
+				}
 				sel.Global = global
 			} else {
-				sel, err = tui.Run(cat, global)
+				// tui.Run drives the full skill/agent/level selection; its
+				// returned Selection already reflects the user's choices at
+				// every phase, so nothing further needs to be merged in.
+				sel, err = tui.Run(cat, targets, global)
 				if err != nil {
 					return fmt.Errorf("tui: %w", err)
 				}
 			}
 
-			sel.Agents = targets
-
 			if len(sel.SkillPaths) == 0 {
 				return fmt.Errorf("no skills selected")
 			}
 
-			if err := install.Apply(sel); err != nil {
+			if err := agent.Apply(sel); err != nil {
 				return fmt.Errorf("install: %w", err)
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "installed %d skill(s) into %d agent(s)\n",
-				len(sel.SkillPaths), len(sel.Agents))
+				len(sel.SkillPaths), len(sel.AgentTypes))
 			return nil
 		},
 	}

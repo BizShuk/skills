@@ -1,4 +1,4 @@
-package install
+package agent
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ import (
 // calls os.Getwd() so callers don't have to plumb the cwd themselves.
 type Selection struct {
 	SkillPaths []string
-	Agents     []Agent
+	AgentTypes []AgentType
 	Global     bool
 	Cwd        string
 }
@@ -39,7 +39,18 @@ func Apply(sel Selection) error {
 		}
 	}
 
-	for _, a := range sel.Agents {
+	// Build a lookup table of all known agents.
+	agentTable := Agents()
+	byType := make(map[AgentType]Agent, len(agentTable))
+	for _, a := range agentTable {
+		byType[a.Type] = a
+	}
+
+	for _, t := range sel.AgentTypes {
+		a, ok := byType[t]
+		if !ok {
+			continue
+		}
 		destRoot := a.ProjectSkillsDir
 		if sel.Global {
 			destRoot = a.UserSkillsDir

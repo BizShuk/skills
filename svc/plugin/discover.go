@@ -1,11 +1,7 @@
-// Package discover walks a source breadth-first, turning every plugin into
-// a node in a plugin tree. Local plugins become Categories directly from
-// their on-disk manifests; remote plugins are fetched in parallel per level,
-// guarded by a visited set keyed on the lowercased ownerRepo and a max
-// depth, and the fetched plugin becomes a child of its parent in the tree
-// rather than a sibling at the same level. The tree shape lets the TUI
-// render nested plugin/sub-plugin relationships directly.
-package discover
+// Package plugin provides the plugin loading subsystem: source parsing,
+// materialization, manifest scanning, and breadth-first tree walking to
+// produce a Catalog of skill categories.
+package plugin
 
 import (
 	"context"
@@ -13,21 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/bizshuk/skills/svc/fetch"
-	"github.com/bizshuk/skills/svc/manifest"
-	"github.com/bizshuk/skills/svc/source"
 	"golang.org/x/sync/errgroup"
 )
-
-// Skill is one skill directory within a Category. Description is a short
-// summary the TUI renders next to each skill row; it is precomputed by
-// manifest.Scan from the first body line of SKILL.md so the TUI never
-// has to read files.
-type Skill struct {
-	Name        string
-	Path        string
-	Description string
-}
 
 // Category is one node in the plugin tree. Skills are the direct leaves of
 // this node; Children are nested remote plugins fetched during discovery
@@ -91,7 +74,7 @@ type queueEntry struct {
 }
 
 // Walk materializes root, then performs a level-by-level BFS over its
-// plugins. At each level every queued entry is scanned with manifest.Scan;
+// plugins. At each level every queued entry is scanned with Scan;
 // local plugins attach Categories immediately (under their parent, or to
 // Roots when parent is nil); remote plugins are fetched in parallel (via
 // errgroup) and either attached as a Category placeholder (whose Children
@@ -105,7 +88,7 @@ type queueEntry struct {
 // The only error path is failure to materialize root itself; every other
 // failure (malformed manifest, unreachable remote) is recorded on the
 // relevant Category and the walk continues.
-func Walk(ctx context.Context, f fetch.Fetcher, root source.ParsedSource, maxDepth int) (*Catalog, error) {
+func Walk(ctx context.Context, f Fetcher, root ParsedSource, maxDepth int) (*Catalog, error) {
 	rootDir, err := f.Materialize(ctx, root)
 	if err != nil {
 		return nil, fmt.Errorf("materialize root: %w", err)
@@ -131,7 +114,7 @@ func Walk(ctx context.Context, f fetch.Fetcher, root source.ParsedSource, maxDep
 		for _, n := range level {
 			n := n
 			g.Go(func() error {
-				parsed, err := manifest.Scan(n.dir)
+				parsed, err := Scan(n.dir)
 				if err != nil {
 					// Malformed manifest — drop the whole node silently per
 					// the spec's error handling rules.
@@ -143,9 +126,7 @@ func Walk(ctx context.Context, f fetch.Fetcher, root source.ParsedSource, maxDep
 				// level is the walk's root).
 				for _, lp := range parsed.Locals {
 					c := &Category{PluginName: lp.Name, FetchOK: true}
-					for _, s := range lp.Skills {
-						c.Skills = append(c.Skills, Skill{Name: s.Name, Path: s.Path, Description: s.Description})
-					}
+					c.Skills = append(c.Skills, lp.Skills...)
 					rootMu.Lock()
 					if n.parent == nil {
 						cat.Roots = append(cat.Roots, c)
@@ -177,8 +158,8 @@ func Walk(ctx context.Context, f fetch.Fetcher, root source.ParsedSource, maxDep
 					if srcURL == "" {
 						srcURL = "https://github.com/" + rp.OwnerRepo + ".git"
 					}
-					src := source.ParsedSource{
-						Type: source.GitHub,
+					src := ParsedSource{
+						Type: GitHub,
 						URL:  srcURL,
 						Ref:  rp.Ref,
 					}

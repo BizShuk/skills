@@ -1,4 +1,4 @@
-package install
+package agent
 
 import (
 	"os"
@@ -55,15 +55,14 @@ func TestApply_ProjectModeCopiesIntoCwdRelativeDir(t *testing.T) {
 
 	sel := Selection{
 		SkillPaths: []string{skillSrc},
-		Agents: []Agent{
-			{Type: "test-project", ProjectSkillsDir: ".claude/skills"},
-		},
-		Global: false,
-		Cwd:    cwd,
+		AgentTypes: []AgentType{"claude-code"},
+		Global:     false,
+		Cwd:        cwd,
 	}
 
 	require.NoError(t, Apply(sel))
 
+	// claude-code.ProjectSkillsDir = ".claude/skills"
 	dest := filepath.Join(cwd, ".claude", "skills", "writer", "SKILL.md")
 	_, err := os.Stat(dest)
 	assert.NoError(t, err, "expected SKILL.md at %s", dest)
@@ -71,25 +70,27 @@ func TestApply_ProjectModeCopiesIntoCwdRelativeDir(t *testing.T) {
 
 // TestApply_GlobalModeCopiesIntoUserDir verifies that when Global is true the
 // skill is copied directly under <agent.UserSkillsDir>/<basename>, ignoring
-// Cwd. We point UserSkillsDir at a tmpdir so the test does not touch $HOME.
+// Cwd. We use a tempdir as $HOME so the test does not touch the real home.
 func TestApply_GlobalModeCopiesIntoUserDir(t *testing.T) {
-	userDir := t.TempDir()
-	otherCwd := t.TempDir()
+	homeDir := t.TempDir()
+	// Create the sentinel that makes Detect() return claude-code.
+	claudeDir := filepath.Join(homeDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	t.Setenv("HOME", homeDir)
+
 	src := t.TempDir()
 	skillSrc := mkSkillDir(t, src, "helper")
 
 	sel := Selection{
 		SkillPaths: []string{skillSrc},
-		Agents: []Agent{
-			{Type: "test-global", UserSkillsDir: userDir},
-		},
-		Global: true,
-		Cwd:    otherCwd,
+		AgentTypes: []AgentType{"claude-code"},
+		Global:     true,
 	}
 
 	require.NoError(t, Apply(sel))
 
-	dest := filepath.Join(userDir, "helper", "SKILL.md")
+	// claude-code.UserSkillsDir = ~/.claude/skills → <homeDir>/.claude/skills
+	dest := filepath.Join(homeDir, ".claude", "skills", "helper", "SKILL.md")
 	_, err := os.Stat(dest)
 	assert.NoError(t, err, "expected SKILL.md at %s", dest)
 }
@@ -104,16 +105,15 @@ func TestApply_BasenameNamesTheSkill(t *testing.T) {
 
 	sel := Selection{
 		SkillPaths: []string{skillSrc},
-		Agents: []Agent{
-			{Type: "test-project", ProjectSkillsDir: "skills"},
-		},
-		Global: false,
-		Cwd:    cwd,
+		AgentTypes: []AgentType{"claude-code"},
+		Global:     false,
+		Cwd:        cwd,
 	}
 
 	require.NoError(t, Apply(sel))
 
-	dest := filepath.Join(cwd, "skills", "renamed", "SKILL.md")
+	// claude-code.ProjectSkillsDir = ".claude/skills"
+	dest := filepath.Join(cwd, ".claude", "skills", "renamed", "SKILL.md")
 	_, err := os.Stat(dest)
 	assert.NoError(t, err, "expected SKILL.md at %s", dest)
 }

@@ -1,4 +1,4 @@
-package fetch
+package plugin
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/bizshuk/skills/svc/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,8 +20,8 @@ func TestLocalMaterializeSuccess(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# test skill"), 0o644))
 
 	f := New()
-	got, err := f.Materialize(context.Background(), source.ParsedSource{
-		Type:      source.Local,
+	got, err := f.Materialize(context.Background(), ParsedSource{
+		Type:      Local,
 		URL:       dir,
 		LocalPath: dir,
 	})
@@ -38,8 +37,8 @@ func TestLocalMaterializeMissingPath(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 
 	f := New()
-	got, err := f.Materialize(context.Background(), source.ParsedSource{
-		Type:      source.Local,
+	got, err := f.Materialize(context.Background(), ParsedSource{
+		Type:      Local,
 		URL:       missing,
 		LocalPath: missing,
 	})

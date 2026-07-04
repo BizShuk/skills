@@ -1,10 +1,9 @@
-package manifest
+package plugin
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -172,14 +171,8 @@ func classifyRemote(name string, obj map[string]any) (RemotePlugin, bool) {
 	return RemotePlugin{}, false
 }
 
-var (
-	reGitHubRepo = regexp.MustCompile(`github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$`)
-	reGitLabRepo = regexp.MustCompile(`gitlab\.com/(.+?)(?:\.git)?/?$`)
-)
-
 // deriveOwnerRepoFromURL pulls an "owner/repo" pair out of a git URL. It
-// is a stripped-down subset of svc/source.Parse so this package can stay
-// independent of source (per the design's layering note).
+// uses the same regexp set as source.go since this is now the same package.
 func deriveOwnerRepoFromURL(rawURL string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
