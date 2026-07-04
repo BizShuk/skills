@@ -3,6 +3,7 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -134,4 +135,53 @@ func TestScan_AdditiveTraversalRejected(t *testing.T) {
 	// Only the ./ok additive skill should appear; ../escape was rejected.
 	require.Len(t, lp.Skills, 1, "traversal rejected, only in-bounds additive kept")
 	assert.Equal(t, "ok", lp.Skills[0].Name)
+}
+
+// TestScan_DescriptionReadsFirstBodyLine verifies that the Description
+// field populated by Scan is the first non-heading, non-empty line of
+// SKILL.md, trimmed. Headings (lines starting with #) are skipped.
+func TestScan_DescriptionReadsFirstBodyLine(t *testing.T) {
+	base := t.TempDir()
+	cpDir := filepath.Join(base, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(cpDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "plugin.json"),
+		[]byte(`{"name":"p"}`), 0o644))
+
+	skillDir := filepath.Join(base, "skills", "alpha")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	body := "# Heading One\n\n# Heading Two\n\nUse when fooing the bar.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "Use when fooing the bar.", parsed.Locals[0].Skills[0].Description,
+		"description should be the first non-heading, non-empty body line, trimmed")
+}
+
+// TestScan_DescriptionTruncatesLongLines verifies that descriptions
+// longer than descMaxChars (60 runes) are truncated to that width and
+// suffixed with "...". CJK characters are counted as one rune each so
+// the cut respects characters, not bytes.
+func TestScan_DescriptionTruncatesLongLines(t *testing.T) {
+	base := t.TempDir()
+	cpDir := filepath.Join(base, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(cpDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "plugin.json"),
+		[]byte(`{"name":"p"}`), 0o644))
+
+	skillDir := filepath.Join(base, "skills", "long")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	long := "# title\n\n" + strings.Repeat("abcdefghij", 10) // 100 ascii chars
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(long), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	got := parsed.Locals[0].Skills[0].Description
+	assert.True(t, strings.HasSuffix(got, "..."), "long description should end with ellipsis: %q", got)
+	// Rune length of the visible (non-ellipsis) part must be ≤ descMaxChars (60).
+	assert.Equal(t, descMaxChars, len([]rune(got))-3,
+		"prefix should be exactly descMaxChars runes before the ellipsis")
 }

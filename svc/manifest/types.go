@@ -5,18 +5,24 @@ package manifest
 
 // Skill is a single skill directory within a local plugin. The directory
 // must contain a SKILL.md file to be recognized.
+//
+// Description is a short human-readable summary the TUI renders next to
+// each skill row. It is the first non-empty non-heading line of SKILL.md,
+// truncated to fit in a one-line preview; empty when the file is
+// unreadable / has no body.
 type Skill struct {
-	Name string // directory name (e.g. "web-design")
-	Path string // absolute path to the skill directory
+	Name        string // directory name (e.g. "web-design")
+	Path        string // absolute path to the skill directory
+	Description string // short summary for TUI rendering (may be empty)
 }
 
 // LocalPlugin is a plugin whose skills live on disk under Base. Its Skills
 // are the union of the conventional `<Base>/skills/<name>/SKILL.md` entries
 // plus any additive entries declared in the manifest's `skills` array.
 type LocalPlugin struct {
-	Name   string   // grouping name taken from manifest
-	Base   string   // absolute path of the plugin directory
-	Skills []Skill  // union of conventional + additive skill dirs
+	Name   string  // grouping name taken from manifest
+	Base   string  // absolute path of the plugin directory
+	Skills []Skill // union of conventional + additive skill dirs
 }
 
 // RemotePlugin is a plugin whose skills must be fetched from another repo.

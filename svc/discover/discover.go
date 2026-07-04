@@ -19,10 +19,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Skill is one skill directory within a Category.
+// Skill is one skill directory within a Category. Description is a short
+// summary the TUI renders next to each skill row; it is precomputed by
+// manifest.Scan from the first body line of SKILL.md so the TUI never
+// has to read files.
 type Skill struct {
-	Name string
-	Path string
+	Name        string
+	Path        string
+	Description string
 }
 
 // Category is one node in the plugin tree. Skills are the direct leaves of
@@ -140,7 +144,7 @@ func Walk(ctx context.Context, f fetch.Fetcher, root source.ParsedSource, maxDep
 				for _, lp := range parsed.Locals {
 					c := &Category{PluginName: lp.Name, FetchOK: true}
 					for _, s := range lp.Skills {
-						c.Skills = append(c.Skills, Skill{Name: s.Name, Path: s.Path})
+						c.Skills = append(c.Skills, Skill{Name: s.Name, Path: s.Path, Description: s.Description})
 					}
 					rootMu.Lock()
 					if n.parent == nil {

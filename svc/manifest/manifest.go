@@ -219,8 +219,26 @@ func normalizeOwnerRepo(repo string) string {
 // the manifest's `skills` array, each treated as a path to SKILL.md).
 // All entry paths must be contained within base; out-of-bounds entries
 // are silently dropped.
+//
+// Each skill's Description is populated by reading the first non-empty
+// non-heading line of its SKILL.md (truncated to descMaxChars + "...").
+// Files that fail to read or have no body leave Description empty — the
+// TUI renders empty parens for those.
 func scanSkills(base string, lp *LocalPlugin, additive []string) {
 	seen := map[string]bool{}
+
+	add := func(skillDir string) {
+		if seen[skillDir] {
+			return
+		}
+		seen[skillDir] = true
+		desc := readDescription(filepath.Join(skillDir, "SKILL.md"))
+		lp.Skills = append(lp.Skills, Skill{
+			Name:        filepath.Base(skillDir),
+			Path:        skillDir,
+			Description: desc,
+		})
+	}
 
 	// Conventional: <lp.Base>/skills/<name>/SKILL.md
 	conventional := filepath.Join(lp.Base, "skills")
@@ -234,11 +252,7 @@ func scanSkills(base string, lp *LocalPlugin, additive []string) {
 			if _, err := os.Stat(skillFile); err != nil {
 				continue
 			}
-			if seen[skillDir] {
-				continue
-			}
-			seen[skillDir] = true
-			lp.Skills = append(lp.Skills, Skill{Name: e.Name(), Path: skillDir})
+			add(skillDir)
 		}
 	}
 
@@ -257,12 +271,49 @@ func scanSkills(base string, lp *LocalPlugin, additive []string) {
 		if _, err := os.Stat(skillFile); err != nil {
 			continue
 		}
-		if seen[skillDir] {
+		add(skillDir)
+	}
+}
+
+// descMaxChars bounds the description preview the TUI renders per skill.
+// If SKILL.md's first body line exceeds this, truncate it and append
+// "..." so the user still sees a non-clipped summary.
+const descMaxChars = 60
+
+// readDescription returns the first non-empty, non-heading line of path
+// (treated as a markdown file), trimmed and truncated to descMaxChars
+// runes. Returns "" if the file is unreadable, empty, or all headings.
+func readDescription(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
 			continue
 		}
-		seen[skillDir] = true
-		lp.Skills = append(lp.Skills, Skill{Name: filepath.Base(skillDir), Path: skillDir})
+		// Skip Markdown ATX headings (#, ##, …). Also skip setext-style
+		// underline (=== / ---) which appears under the title; we
+		// recognize it by virtue of the previous line already being
+		// skipped, and we filter it here too as a safety net.
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if line == "---" || line == "===" {
+			continue
+		}
+		// Truncate by rune count, not byte count, so non-ASCII (CJK)
+		// descriptions don't clip mid-character.
+		if n := len([]rune(line)); n > descMaxChars {
+			// Keep whole runes up to descMaxChars, then add ellipsis.
+			runes := []rune(line)[:descMaxChars]
+			return strings.TrimRight(string(runes), " ") + "..."
+		}
+		return line
 	}
+	return ""
 }
 
 // isContainedIn reports whether target resolves to a path inside (or equal
