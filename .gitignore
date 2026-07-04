@@ -1,10 +1,11 @@
-# dependencies (bun install)
-node_modules
-
-# output
-out
-dist
+# build output
+bin/
+dist/
+out/
 *.tgz
+
+# go binary clash with skills/ data dir
+/skills
 
 # code coverage
 coverage
@@ -12,8 +13,7 @@ coverage
 
 # logs
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+*.log
 
 # dotenv environment variable files
 .env
@@ -23,9 +23,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 
 # caches
-.eslintcache
 .cache
-*.tsbuildinfo
 
 # IntelliJ based IDEs
 .idea
@@ -33,21 +31,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-*.log
-package-lock.json
-.codebuddy/
-.agent/
+# agent runtime data dirs (host tools create these)
 .agents/
+.agent/
 .claude/
 .cursor/
 .gemini/
-.github/skills/
 .opencode/
-.qoder/
-.qwen/
-.trae/
 .vscode/
-
-bin/_chunks/
-bin/cli-wrapper.mjs
-bin/cli.d.mts
