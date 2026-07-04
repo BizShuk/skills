@@ -27,7 +27,29 @@ func Scan(base string) (Parsed, error) {
 	if err := scanPluginAtBase(absBase, &out); err != nil {
 		return Parsed{}, err
 	}
+	out.Locals = dedupeLocalsByBase(out.Locals)
 	return out, nil
+}
+
+// dedupeLocalsByBase collapses LocalPlugins that resolve to the same base
+// directory. A repo that ships BOTH a marketplace.json self-entry (source
+// "./") and a plugin.json describes the very same root plugin twice; scanning
+// both would otherwise surface it as two identical categories. Keeping the
+// first occurrence (marketplace before plugin.json) yields one category.
+// Distinct bases — real sub-plugins under different subdirs — are preserved in
+// their original order.
+func dedupeLocalsByBase(locals []LocalPlugin) []LocalPlugin {
+	seen := make(map[string]bool, len(locals))
+	out := make([]LocalPlugin, 0, len(locals))
+	for _, lp := range locals {
+		key := filepath.Clean(lp.Base)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, lp)
+	}
+	return out
 }
 
 // marketplacePlugin describes one entry under the marketplace's `plugins[]`.

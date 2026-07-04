@@ -173,6 +173,53 @@ func TestWalk_DepthLimitStops(t *testing.T) {
 	assert.Nil(t, findByName(cat, "deep"), "deep must NOT appear — depth+1 > maxDepth, no placeholder per spec")
 }
 
+// TestWalk_RemoteRootPluginAbsorbedNotNested reproduces the bizshuk/gosdk
+// case end-to-end: the root marketplace declares a remote "gosdk" plugin whose
+// fetched repo is itself a single root plugin (marketplace self-source "./"
+// PLUS a plugin.json, both named "gosdk"). The walker must NOT render a
+// redundant "gosdk → gosdk (×2)" tree; instead the placeholder absorbs the
+// repo's own skills and gains no children.
+func TestWalk_RemoteRootPluginAbsorbedNotNested(t *testing.T) {
+	// The fetched repo: a root plugin declared twice (marketplace self + plugin.json).
+	repo := t.TempDir()
+	cpDir := filepath.Join(repo, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(cpDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "marketplace.json"), []byte(`{
+		"plugins": [{ "name": "gosdk", "source": "./" }]
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "plugin.json"), []byte(`{
+		"name": "gosdk"
+	}`), 0o644))
+	skillDir := filepath.Join(repo, "skills", "golang-dev")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# dev"), 0o644))
+
+	root := t.TempDir()
+	mkMarketplace(t, root, `{
+		"plugins": [
+			{"name": "gosdk", "source": {"source": "github", "repo": "bizshuk/gosdk"}}
+		]
+	}`)
+
+	ff := fakeFetcher{repos: map[string]string{"bizshuk/gosdk": repo}}
+	cat, err := Walk(
+		context.Background(),
+		ff,
+		ParsedSource{Type: Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1, "exactly one root category — the remote placeholder")
+	c := cat.Roots[0]
+	assert.Equal(t, "gosdk", c.PluginName)
+	assert.Equal(t, "bizshuk/gosdk", c.OwnerRepo)
+	assert.True(t, c.FetchOK)
+	assert.Empty(t, c.Children, "the repo's own root plugin is absorbed, not nested as a same-name child")
+	require.Len(t, c.Skills, 1, "skills are absorbed once — not duplicated, not one layer deep")
+	assert.Equal(t, "golang-dev", c.Skills[0].Name)
+}
+
 // TestWalk_NestedRemotePluginAppearsAsChild verifies the tree shape: a
 // remote plugin fetched from the root is NOT a sibling at the root, but a
 // child of the root. And if that fetched remote itself declares a local

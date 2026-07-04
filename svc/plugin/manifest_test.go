@@ -99,6 +99,37 @@ func TestScan_PluginJsonOnly(t *testing.T) {
 	assert.True(t, names["extra"], "additive skill present")
 }
 
+// TestScan_SelfMarketplaceAndPluginJsonDedup reproduces the real-world
+// bizshuk/gosdk layout: a repo that ships BOTH a marketplace.json whose only
+// plugin points at itself (source "./") AND a plugin.json at root, both naming
+// the same plugin. Scanning both used to surface the plugin twice; Scan must
+// now collapse the same-base duplicate into exactly one LocalPlugin.
+func TestScan_SelfMarketplaceAndPluginJsonDedup(t *testing.T) {
+	base := t.TempDir()
+	cpDir := filepath.Join(base, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(cpDir, 0o755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "marketplace.json"), []byte(`{
+		"plugins": [{ "name": "gosdk", "source": "./" }]
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "plugin.json"), []byte(`{
+		"name": "gosdk"
+	}`), 0o644))
+
+	skillDir := filepath.Join(base, "skills", "golang-dev")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# dev"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+
+	require.Len(t, parsed.Locals, 1, "same-base marketplace-self + plugin.json must dedupe to one plugin")
+	lp := parsed.Locals[0]
+	assert.Equal(t, "gosdk", lp.Name)
+	require.Len(t, lp.Skills, 1, "the one skill appears once, not twice")
+	assert.Equal(t, "golang-dev", lp.Skills[0].Name)
+}
+
 // TestScan_AdditiveTraversalRejected verifies that an additive skill path
 // whose parent directory escapes `base` is silently dropped — the plugin
 // still surfaces (with its valid plugins intact) but the bad skill does not.

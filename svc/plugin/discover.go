@@ -6,6 +6,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -121,10 +122,29 @@ func Walk(ctx context.Context, f Fetcher, root ParsedSource, maxDepth int) (*Cat
 					return nil
 				}
 
+				// A local plugin whose base IS the scanned dir is the repo's
+				// own root plugin. When we reached this dir by fetching a
+				// remote placeholder (n.parent != nil), that root plugin and
+				// the placeholder are the same plugin: absorb its skills into
+				// the placeholder instead of nesting a same-repo child one
+				// level deeper (which showed as a redundant "gosdk → gosdk"
+				// layer). Sub-directory plugins — the genuine members of a
+				// multi-plugin marketplace — still nest normally below.
+				dirKey := filepath.Clean(n.dir)
+				if abs, aerr := filepath.Abs(n.dir); aerr == nil {
+					dirKey = filepath.Clean(abs)
+				}
+
 				// Local plugins: each one becomes a Category with its skills,
 				// attached under the current parent (or to Roots when this
 				// level is the walk's root).
 				for _, lp := range parsed.Locals {
+					if n.parent != nil && filepath.Clean(lp.Base) == dirKey {
+						rootMu.Lock()
+						n.parent.Skills = append(n.parent.Skills, lp.Skills...)
+						rootMu.Unlock()
+						continue
+					}
 					c := &Category{PluginName: lp.Name, FetchOK: true}
 					c.Skills = append(c.Skills, lp.Skills...)
 					rootMu.Lock()
