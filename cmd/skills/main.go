@@ -55,10 +55,8 @@ func main() {
 
 			var sel install.Selection
 			if yes {
-				for _, c := range cat {
-					for _, s := range c.Skills {
-						sel.SkillPaths = append(sel.SkillPaths, s.Path)
-					}
+				for _, s := range cat.AllSkills() {
+					sel.SkillPaths = append(sel.SkillPaths, s.Path)
 				}
 				sel.Global = global
 			} else {

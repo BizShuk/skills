@@ -42,8 +42,40 @@ func mkSkill(t *testing.T, base, plugin, skill string) string {
 	return dir
 }
 
+// findByName returns the first Category in the tree whose PluginName
+// matches. Useful for tests that don't care about the tree shape — they
+// just want the category by name.
+func findByName(c *Catalog, name string) *Category {
+	if c == nil {
+		return nil
+	}
+	var found *Category
+	var walk func(n *Category) bool
+	walk = func(n *Category) bool {
+		if n == nil {
+			return false
+		}
+		if n.PluginName == name {
+			found = n
+			return true
+		}
+		for _, ch := range n.Children {
+			if walk(ch) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range c.Roots {
+		if walk(r) {
+			return found
+		}
+	}
+	return nil
+}
+
 // TestWalk_LocalOnlyWalk seeds a root with one local plugin (skills/writer)
-// and expects exactly one Category carrying that one skill.
+// and expects exactly one root Category carrying that one skill.
 func TestWalk_LocalOnlyWalk(t *testing.T) {
 	root := t.TempDir()
 	mkMarketplace(t, root, `{
@@ -59,21 +91,23 @@ func TestWalk_LocalOnlyWalk(t *testing.T) {
 		3,
 	)
 	require.NoError(t, err)
-	require.Len(t, cat, 1, "exactly one category for the one local plugin")
-	c := cat[0]
+	require.Len(t, cat.Roots, 1, "exactly one root category for the one local plugin")
+	c := cat.Roots[0]
 	assert.Equal(t, "docs", c.PluginName)
 	assert.Empty(t, c.OwnerRepo, "local category has no remote parent")
 	assert.True(t, c.FetchOK)
 	assert.Empty(t, c.FetchErr)
+	assert.Empty(t, c.Children, "local-only walk should produce no remote children")
 	require.Len(t, c.Skills, 1)
 	assert.Equal(t, "writer", c.Skills[0].Name)
 	assert.Equal(t, skillPath, c.Skills[0].Path)
 }
 
-// TestWalk_RemoteUnreachable seeds a root with one remote plugin whose repo
-// the fakeFetcher cannot materialize. The walker must surface a Category with
-// FetchOK=false and a non-empty FetchErr ("unable to fetch") but continue
-// without erroring out.
+// TestWalk_RemoteUnreachable seeds a root with one remote plugin whose
+// repo the fakeFetcher cannot materialize. The walker must surface a
+// failed Category (FetchOK=false, FetchErr non-empty) but continue without
+// erroring out. The failed category lives at the root level since its
+// parent is the walk's root.
 func TestWalk_RemoteUnreachable(t *testing.T) {
 	root := t.TempDir()
 	mkMarketplace(t, root, `{
@@ -89,23 +123,25 @@ func TestWalk_RemoteUnreachable(t *testing.T) {
 		3,
 	)
 	require.NoError(t, err)
-	require.Len(t, cat, 1)
-	c := cat[0]
-	assert.Equal(t, "remote", c.PluginName)
+	c := findByName(cat, "remote")
+	require.NotNil(t, c, "remote must appear as a category even on fetch failure")
 	assert.Equal(t, "acme/missing", c.OwnerRepo)
 	assert.False(t, c.FetchOK)
 	assert.NotEmpty(t, c.FetchErr)
+	assert.Empty(t, c.Children, "fetch-failed plugin has no children")
 }
 
 // TestWalk_DepthLimitStops verifies that maxDepth=1 stops the walker from
 // recursing past the first remote hop:
 //   - root marketplace declares remote "lvl1" (fetched).
-//   - inner dir (the fetched lvl1 dir) declares remote "deep"; depth+1 would
-//     be 2 which exceeds maxDepth=1, so the walker does NOT enqueue a fetch
-//     and does NOT add a placeholder category for "deep".
+//   - inner dir (the fetched lvl1 dir) declares remote "deep"; depth+1
+//     would be 2 which exceeds maxDepth=1, so the walker does NOT enqueue
+//     a fetch and does NOT add a placeholder category for "deep".
 //
-// "lvl1" itself must surface as a Category with FetchOK=true so the TUI can
-// display it (even though no local plugins live inside its fetched dir).
+// "lvl1" itself must surface as a Category with FetchOK=true so the TUI
+// can display it (even though no local plugins live inside its fetched
+// dir). Because "deep" was depth-gated, "lvl1" has no children in the
+// resulting tree.
 func TestWalk_DepthLimitStops(t *testing.T) {
 	inner := t.TempDir()
 	mkMarketplace(t, inner, `{
@@ -130,10 +166,66 @@ func TestWalk_DepthLimitStops(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	names := map[string]bool{}
-	for _, c := range cat {
-		names[c.PluginName] = true
-	}
-	assert.True(t, names["lvl1"], "lvl1 must surface as a successfully-fetched category")
-	assert.False(t, names["deep"], "deep must NOT appear — depth+1 > maxDepth, no placeholder per spec")
+	lvl1 := findByName(cat, "lvl1")
+	require.NotNil(t, lvl1, "lvl1 must surface as a successfully-fetched category")
+	assert.True(t, lvl1.FetchOK)
+	assert.Empty(t, lvl1.Children, "lvl1 has no children — its 'deep' remote was depth-gated")
+
+	assert.Nil(t, findByName(cat, "deep"), "deep must NOT appear — depth+1 > maxDepth, no placeholder per spec")
+}
+
+// TestWalk_NestedRemotePluginAppearsAsChild verifies the tree shape: a
+// remote plugin fetched from the root is NOT a sibling at the root, but a
+// child of the root. And if that fetched remote itself declares a local
+// plugin, that local plugin lives inside the remote's subtree — not back
+// at the root level.
+//
+// Layout:
+//   - root marketplace.json declares remote "lvl1".
+//   - lvl1's fetched dir contains marketplace.json declaring local
+//     "inner-doc" with one skill.
+//
+// Expected tree:
+//   - cat.Roots: [lvl1]
+//   - lvl1.Children: [inner-doc]
+//   - inner-doc.Skills: [writer]
+func TestWalk_NestedRemotePluginAppearsAsChild(t *testing.T) {
+	// The directory the fakeFetcher serves for "acme/inner". It contains a
+	// marketplace.json that declares a *local* plugin "inner-doc".
+	inner := t.TempDir()
+	mkSkill(t, inner, "inner-doc", "writer")
+	mkMarketplace(t, inner, `{
+		"metadata": {"pluginRoot": "./"},
+		"plugins": [{"name": "inner-doc", "source": "./inner-doc"}]
+	}`)
+
+	root := t.TempDir()
+	mkMarketplace(t, root, `{
+		"plugins": [
+			{"name": "lvl1", "source": {"source": "github", "repo": "acme/inner"}}
+		]
+	}`)
+
+	ff := fakeFetcher{repos: map[string]string{"acme/inner": inner}}
+	cat, err := Walk(
+		context.Background(),
+		ff,
+		source.ParsedSource{Type: source.Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1, "only 'lvl1' is at the root — 'inner-doc' is its child")
+	lvl1 := cat.Roots[0]
+	assert.Equal(t, "lvl1", lvl1.PluginName)
+	assert.Equal(t, "acme/inner", lvl1.OwnerRepo)
+	assert.True(t, lvl1.FetchOK)
+
+	require.Len(t, lvl1.Children, 1, "lvl1 has exactly one child: inner-doc")
+	innerDoc := lvl1.Children[0]
+	assert.Equal(t, "inner-doc", innerDoc.PluginName)
+	assert.Empty(t, innerDoc.OwnerRepo, "inner-doc is a local plugin inside lvl1, no remote parent")
+	assert.True(t, innerDoc.FetchOK)
+	require.Len(t, innerDoc.Skills, 1)
+	assert.Equal(t, "writer", innerDoc.Skills[0].Name)
 }
