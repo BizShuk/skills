@@ -216,3 +216,43 @@ func TestScan_DescriptionTruncatesLongLines(t *testing.T) {
 	assert.Equal(t, descMaxChars, len([]rune(got))-3,
 		"prefix should be exactly descMaxChars runes before the ellipsis")
 }
+
+// TestScan_SkillJsonOnly verifies that skill.json at root and .claude/skills conventional
+// directories are properly discovered.
+func TestScan_SkillJsonOnly(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"ui-ux"}`), 0o644))
+
+	// Put a skill in .claude/skills/design/SKILL.md
+	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Design\nDesc"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	assert.Equal(t, "ui-ux", parsed.Locals[0].Name)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "design", parsed.Locals[0].Skills[0].Name)
+}
+
+// TestScan_DescriptionReadsYAMLFrontmatter verifies that YAML frontmatter
+// description field is parsed and preferred over the name/other fields.
+func TestScan_DescriptionReadsYAMLFrontmatter(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"ui-ux"}`), 0o644))
+
+	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	body := `---\nname: design-skill\ndescription: "This is a beautiful skill description"\n---\n# Title\nSome body text`
+	body = strings.ReplaceAll(body, "\\n", "\n")
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "This is a beautiful skill description", parsed.Locals[0].Skills[0].Description)
+}
+
+

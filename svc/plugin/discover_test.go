@@ -275,3 +275,39 @@ func TestWalk_NestedRemotePluginAppearsAsChild(t *testing.T) {
 	require.Len(t, innerDoc.Skills, 1)
 	assert.Equal(t, "writer", innerDoc.Skills[0].Name)
 }
+
+// TestWalk_RedundantSubPluginAbsorbed verifies that sub-plugins with the same
+// name as the parent remote category are absorbed, avoiding redundant layers.
+func TestWalk_RedundantSubPluginAbsorbed(t *testing.T) {
+	inner := t.TempDir()
+	subDir := filepath.Join(inner, "understand-anything-plugin")
+	mkSkill(t, subDir, "", "explainer")
+	mkMarketplace(t, inner, `{
+		"metadata": {"pluginRoot": "./"},
+		"plugins": [{"name": "understand-anything", "source": "./understand-anything-plugin"}]
+	}`)
+
+	root := t.TempDir()
+	mkMarketplace(t, root, `{
+		"plugins": [
+			{"name": "understand-anything", "source": {"source": "github", "repo": "egonex-ai/understand-anything"}}
+		]
+	}`)
+
+	ff := fakeFetcher{repos: map[string]string{"egonex-ai/understand-anything": inner}}
+	cat, err := Walk(
+		context.Background(),
+		ff,
+		ParsedSource{Type: Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1)
+	ua := cat.Roots[0]
+	assert.Equal(t, "understand-anything", ua.PluginName)
+	assert.Len(t, ua.Children, 0, "the sub-plugin should be absorbed, leaving no redundant child layers")
+	require.Len(t, ua.Skills, 1)
+	assert.Equal(t, "explainer", ua.Skills[0].Name)
+}
+

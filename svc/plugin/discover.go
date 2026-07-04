@@ -139,7 +139,7 @@ func Walk(ctx context.Context, f Fetcher, root ParsedSource, maxDepth int) (*Cat
 				// attached under the current parent (or to Roots when this
 				// level is the walk's root).
 				for _, lp := range parsed.Locals {
-					if n.parent != nil && filepath.Clean(lp.Base) == dirKey {
+					if n.parent != nil && (filepath.Clean(lp.Base) == dirKey || strings.EqualFold(lp.Name, n.parent.PluginName)) {
 						rootMu.Lock()
 						n.parent.Skills = append(n.parent.Skills, lp.Skills...)
 						rootMu.Unlock()

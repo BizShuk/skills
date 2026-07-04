@@ -376,9 +376,9 @@ func TestViewportClipsToHeight(t *testing.T) {
 
 	// Body row count is exactly the viewport.
 	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
-	// lines[0]=title, [1]="Search: ...", [2]="↑↓ ...", [3]="", then body.
-	// Body rows are lines[4:7]. The "↓ N more" must appear at the bottom.
-	bodyEnd := 4 + 3
+	// lines[0]=title, [1]=summary, [2]="Search: ...", [3]="↑↓ ...", [4]="", then body.
+	// Body rows are lines[5:8]. The "↓ N more" must appear at the bottom.
+	bodyEnd := 5 + 3
 	require.GreaterOrEqual(t, len(lines), bodyEnd+1, "View must include the '↓ N more' line after 3 body rows")
 	assert.Equal(t, "↓ 3 more", strings.TrimSpace(lines[bodyEnd]),
 		"footer reports 6-3=3 rows still off-screen")
@@ -630,4 +630,29 @@ func TestMakeAgentsSkipsNonDefaultDetectedAgent(t *testing.T) {
 	assert.True(t, rows[0].detected, "codex folder exists, so it should be marked detected")
 	assert.False(t, rows[0].checked, "codex is detected but not a default-checked type, so it must stay unchecked")
 }
+
+// TestRemoteRootPluginsAreFoldedByDefault verifies that remote root plugins
+// start folded by default, while local root plugins start expanded.
+func TestRemoteRootPluginsAreFoldedByDefault(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "local-plugin",
+				FetchOK:    true,
+				Skills:     []plugin.Skill{{Name: "local-skill", Path: "/p/local"}},
+			},
+			{
+				PluginName: "remote-plugin",
+				OwnerRepo:  "owner/repo",
+				FetchOK:    true,
+				Skills:     []plugin.Skill{{Name: "remote-skill", Path: "/p/remote"}},
+			},
+		},
+	}
+	m := NewModel(cat, nil)
+	view := m.View()
+	assert.Contains(t, view, "local-skill", "local root plugin skill must render since it starts expanded")
+	assert.NotContains(t, view, "remote-skill", "remote root plugin skill must NOT render since it starts folded")
+}
+
 

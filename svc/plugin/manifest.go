@@ -27,8 +27,33 @@ func Scan(base string) (Parsed, error) {
 	if err := scanPluginAtBase(absBase, &out); err != nil {
 		return Parsed{}, err
 	}
+	if err := scanSkillJsonAtBase(absBase, &out); err != nil {
+		return Parsed{}, err
+	}
 	out.Locals = dedupeLocalsByBase(out.Locals)
 	return out, nil
+}
+
+// scanSkillJsonAtBase reads `<base>/skill.json` (legacy/alternative plugin format)
+// and appends it to out as a LocalPlugin whose Base is base itself.
+func scanSkillJsonAtBase(base string, out *Parsed) error {
+	data, err := os.ReadFile(filepath.Join(base, "skill.json"))
+	if err != nil {
+		return nil
+	}
+	var mf struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &mf); err != nil {
+		return nil
+	}
+	if mf.Name == "" {
+		return nil
+	}
+	lp := LocalPlugin{Name: mf.Name, Base: base}
+	scanSkills(base, &lp, nil)
+	out.Locals = append(out.Locals, lp)
+	return nil
 }
 
 // dedupeLocalsByBase collapses LocalPlugins that resolve to the same base
@@ -255,19 +280,25 @@ func scanSkills(base string, lp *LocalPlugin, additive []string) {
 		})
 	}
 
-	// Conventional: <lp.Base>/skills/<name>/SKILL.md
-	conventional := filepath.Join(lp.Base, "skills")
-	if entries, err := os.ReadDir(conventional); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
+	// Conventional: <lp.Base>/skills/<name>/SKILL.md, <lp.Base>/.claude/skills/<name>/SKILL.md, <lp.Base>/.agents/skills/<name>/SKILL.md
+	conventionalDirs := []string{
+		filepath.Join(lp.Base, "skills"),
+		filepath.Join(lp.Base, ".claude", "skills"),
+		filepath.Join(lp.Base, ".agents", "skills"),
+	}
+	for _, conv := range conventionalDirs {
+		if entries, err := os.ReadDir(conv); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				skillDir := filepath.Join(conv, e.Name())
+				skillFile := filepath.Join(skillDir, "SKILL.md")
+				if _, err := os.Stat(skillFile); err != nil {
+					continue
+				}
+				add(skillDir)
 			}
-			skillDir := filepath.Join(conventional, e.Name())
-			skillFile := filepath.Join(skillDir, "SKILL.md")
-			if _, err := os.Stat(skillFile); err != nil {
-				continue
-			}
-			add(skillDir)
 		}
 	}
 
@@ -298,38 +329,85 @@ const descMaxChars = 60
 // readDescription returns the first non-empty, non-heading line of path
 // (treated as a markdown file), trimmed and truncated to descMaxChars
 // runes. Returns "" if the file is unreadable, empty, or all headings.
+// If the file starts with YAML frontmatter, it extracts the "description" field.
 func readDescription(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, raw := range lines {
+	content := string(data)
+	// Check if there is YAML frontmatter.
+	if strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r\n") {
+		lines := strings.Split(content, "\n")
+		var fmLines []string
+		inFM := false
+		for i, line := range lines {
+			lineTrim := strings.TrimSpace(line)
+			if i == 0 && lineTrim == "---" {
+				inFM = true
+				continue
+			}
+			if inFM && lineTrim == "---" {
+				inFM = false
+				break
+			}
+			if inFM {
+				fmLines = append(fmLines, line)
+			}
+		}
+		// Search for description: in the frontmatter lines
+		for _, fmLine := range fmLines {
+			fmLineTrim := strings.TrimSpace(fmLine)
+			if strings.HasPrefix(strings.ToLower(fmLineTrim), "description:") {
+				desc := strings.TrimSpace(strings.TrimPrefix(fmLineTrim, fmLineTrim[:12]))
+				if len(desc) >= 2 {
+					if (desc[0] == '"' && desc[len(desc)-1] == '"') || (desc[0] == '\'' && desc[len(desc)-1] == '\'') {
+						desc = desc[1 : len(desc)-1]
+					}
+				}
+				if desc != "" {
+					return truncateRune(desc, descMaxChars)
+				}
+			}
+		}
+	}
+
+	lines := strings.Split(content, "\n")
+	inFM := false
+	for i, raw := range lines {
 		line := strings.TrimSpace(raw)
+		if i == 0 && line == "---" {
+			inFM = true
+			continue
+		}
+		if inFM {
+			if line == "---" {
+				inFM = false
+			}
+			continue
+		}
 		if line == "" {
 			continue
 		}
-		// Skip Markdown ATX headings (#, ##, …). Also skip setext-style
-		// underline (=== / ---) which appears under the title; we
-		// recognize it by virtue of the previous line already being
-		// skipped, and we filter it here too as a safety net.
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
 		if line == "---" || line == "===" {
 			continue
 		}
-		// Truncate by rune count, not byte count, so non-ASCII (CJK)
-		// descriptions don't clip mid-character.
-		if n := len([]rune(line)); n > descMaxChars {
-			// Keep whole runes up to descMaxChars, then add ellipsis.
-			runes := []rune(line)[:descMaxChars]
-			return strings.TrimRight(string(runes), " ") + "..."
-		}
-		return line
+		return truncateRune(line, descMaxChars)
 	}
 	return ""
 }
+
+func truncateRune(line string, maxChars int) string {
+	if n := len([]rune(line)); n > maxChars {
+		runes := []rune(line)[:maxChars]
+		return strings.TrimRight(string(runes), " ") + "..."
+	}
+	return line
+}
+
 
 // isContainedIn reports whether target resolves to a path inside (or equal
 // to) base. It cleans both sides and uses filepath.Rel — a target outside

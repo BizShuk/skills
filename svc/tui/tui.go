@@ -151,6 +151,9 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 		}
 	}
 	for _, root := range cat.Roots {
+		if root.OwnerRepo != "" {
+			m.folded[root] = true
+		}
 		foldNested(root)
 	}
 	m.rebuildVisible()
@@ -634,6 +637,35 @@ const (
 //	↑↓ move, space select, enter confirm
 //	(blank)
 //	<body rows, clipped to viewportHeight, plus "↓ N more" if off-screen>
+func (m Model) countSummary() (totalPlugins, remotePlugins, totalSkills, remoteSkills int) {
+	var walk func(c *plugin.Category)
+	walk = func(c *plugin.Category) {
+		if c == nil {
+			return
+		}
+		totalPlugins++
+		if c.OwnerRepo != "" {
+			remotePlugins++
+		}
+		totalSkills += len(c.Skills)
+		if c.OwnerRepo != "" {
+			remoteSkills += len(c.Skills)
+		}
+		for _, ch := range c.Children {
+			walk(ch)
+		}
+	}
+	for _, r := range m.cat.Roots {
+		walk(r)
+	}
+	return
+}
+
+// View renders the tree. The header order matches the spec:
+//
+//	Select skills to install
+//	Search: <input>
+//	↑↓ move, space select, enter confirm
 //
 // Each header is `<indent>> <box> <pluginName>` (or `> …` if cursor).
 // Each skill row is `<indent>> <box> <name> — <description>`, with the
@@ -650,6 +682,8 @@ func (m Model) View() string {
 
 	var b strings.Builder
 	b.WriteString("Select skills to install\n")
+	tp, rp, ts, rs := m.countSummary()
+	b.WriteString(fmt.Sprintf("Plugins: %d (%d remote), Skills: %d (%d remote)\n", tp, rp, ts, rs))
 	b.WriteString("Search: ")
 	b.WriteString(m.search.View())
 	b.WriteString("\n")
