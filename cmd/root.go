@@ -8,12 +8,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/bizshuk/skills/svc/agent"
 	"github.com/bizshuk/skills/svc/plugin"
 	"github.com/bizshuk/skills/svc/tui"
+	"github.com/bizshuk/skills/svc/update"
+	"github.com/bizshuk/skills/utils"
 )
 
 // Execute builds the cobra command tree and runs it with os.Args.
@@ -38,7 +41,7 @@ func Execute() error {
 				return fmt.Errorf("source: %w", err)
 			}
 
-			cat, err := plugin.Walk(ctx, plugin.New(), src, depth)
+			cat, err := utils.Walk(ctx, plugin.New(), src, depth)
 			if err != nil {
 				return fmt.Errorf("discover: %w", err)
 			}
@@ -73,6 +76,9 @@ func Execute() error {
 				for _, s := range cat.AllSkills() {
 					sel.SkillPaths = append(sel.SkillPaths, s.Path)
 				}
+				for _, sa := range cat.AllSubagents() {
+					sel.SubagentPaths = append(sel.SubagentPaths, sa.Path)
+				}
 				for _, a := range targets {
 					sel.AgentTypes = append(sel.AgentTypes, a.Type)
 				}
@@ -87,16 +93,19 @@ func Execute() error {
 				}
 			}
 
-			if len(sel.SkillPaths) == 0 {
-				return fmt.Errorf("no skills selected")
+			if len(sel.SkillPaths) == 0 && len(sel.SubagentPaths) == 0 {
+				return fmt.Errorf("no skills or subagents selected")
 			}
 
 			if err := agent.Apply(sel); err != nil {
 				return fmt.Errorf("install: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "installed %d skill(s) into %d agent(s)\n",
-				len(sel.SkillPaths), len(sel.AgentTypes))
+			// Record install metadata for future "skills update".
+			recordInstall(args[0], sel)
+
+			fmt.Fprintf(cmd.OutOrStdout(), "installed %d skill(s), %d subagent(s) into %d agent(s)\n",
+				len(sel.SkillPaths), len(sel.SubagentPaths), len(sel.AgentTypes))
 			return nil
 		},
 	}
@@ -106,5 +115,65 @@ func Execute() error {
 	add.Flags().BoolVar(&yes, "yes", false, "skip TUI, install all detected")
 	root.AddCommand(add)
 
+	updateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Re-install tracked skills from their original sources",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return update.Run(args)
+		},
+	}
+	root.AddCommand(updateCmd)
+
 	return root.Execute()
+}
+
+// recordInstall persists the install metadata so "skills update" can
+// reproduce this installation later.
+func recordInstall(source string, sel agent.Selection) {
+	f, err := update.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot load installs file: %v\n", err)
+		return
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot resolve cwd: %v\n", err)
+		return
+	}
+
+	scope := update.ScopeProject
+	if sel.Global {
+		scope = update.ScopeGlobal
+		cwd = "" // project path irrelevant for global installs
+	}
+
+	// Collect skill and subagent names from their paths.
+	var skillNames []string
+	for _, p := range sel.SkillPaths {
+		skillNames = append(skillNames, agent.SkillNameFromPath(p))
+	}
+	var subagentNames []string
+	for _, p := range sel.SubagentPaths {
+		subagentNames = append(subagentNames, agent.SubagentNameFromPath(p))
+	}
+
+	var agentNames []string
+	for _, t := range sel.AgentTypes {
+		agentNames = append(agentNames, string(t))
+	}
+
+	update.Upsert(f, update.Entry{
+		Source:      source,
+		ProjectPath: cwd,
+		Agents:      agentNames,
+		Scope:       scope,
+		Depth:       3, // default depth; not currently plumbed from sel
+		Skills:      skillNames,
+		Subagents:   subagentNames,
+	})
+
+	if err := update.Save(f); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot save installs file: %v\n", err)
+	}
 }

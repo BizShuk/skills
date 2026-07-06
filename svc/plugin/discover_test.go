@@ -1,4 +1,4 @@
-package plugin
+package plugin_test
 
 import (
 	"context"
@@ -9,14 +9,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/bizshuk/skills/svc/plugin"
+	"github.com/bizshuk/skills/utils"
 )
 
 // fakeFetcher maps an ownerRepo substring to a prepared local dir. Unknown
 // repos fall through to os.ErrNotExist so the caller observes a fetch failure.
 type fakeFetcher struct{ repos map[string]string }
 
-func (f fakeFetcher) Materialize(_ context.Context, s ParsedSource) (string, error) {
-	if s.Type == Local {
+func (f fakeFetcher) Materialize(_ context.Context, s plugin.ParsedSource) (string, error) {
+	if s.Type == plugin.Local {
 		return s.LocalPath, nil
 	}
 	for or, dir := range f.repos {
@@ -33,9 +36,9 @@ func mkMarketplace(t *testing.T, root, body string) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude-plugin/marketplace.json"), []byte(body), 0o644))
 }
 
-func mkSkill(t *testing.T, base, plugin, skill string) string {
+func mkSkill(t *testing.T, base, pluginName, skill string) string {
 	t.Helper()
-	dir := filepath.Join(base, plugin, "skills", skill)
+	dir := filepath.Join(base, pluginName, "skills", skill)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+skill), 0o644))
 	return dir
@@ -44,13 +47,13 @@ func mkSkill(t *testing.T, base, plugin, skill string) string {
 // findByName returns the first Category in the tree whose PluginName
 // matches. Useful for tests that don't care about the tree shape — they
 // just want the category by name.
-func findByName(c *Catalog, name string) *Category {
+func findByName(c *plugin.Catalog, name string) *plugin.Category {
 	if c == nil {
 		return nil
 	}
-	var found *Category
-	var walk func(n *Category) bool
-	walk = func(n *Category) bool {
+	var found *plugin.Category
+	var walk func(n *plugin.Category) bool
+	walk = func(n *plugin.Category) bool {
 		if n == nil {
 			return false
 		}
@@ -83,10 +86,10 @@ func TestWalk_LocalOnlyWalk(t *testing.T) {
 	}`)
 	skillPath := mkSkill(t, filepath.Join(root, "p"), "d", "writer")
 
-	cat, err := Walk(
+	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{},
-		ParsedSource{Type: Local, LocalPath: root},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -115,10 +118,10 @@ func TestWalk_RemoteUnreachable(t *testing.T) {
 		]
 	}`)
 
-	cat, err := Walk(
+	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{}},
-		ParsedSource{Type: Local, LocalPath: root},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -157,10 +160,10 @@ func TestWalk_DepthLimitStops(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"acme/inner": inner}}
-	cat, err := Walk(
+	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		ParsedSource{Type: Local, LocalPath: root},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
 		1,
 	)
 	require.NoError(t, err)
@@ -202,10 +205,10 @@ func TestWalk_RemoteRootPluginAbsorbedNotNested(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"bizshuk/gosdk": repo}}
-	cat, err := Walk(
+	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		ParsedSource{Type: Local, LocalPath: root},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -253,10 +256,10 @@ func TestWalk_NestedRemotePluginAppearsAsChild(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"acme/inner": inner}}
-	cat, err := Walk(
+	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		ParsedSource{Type: Local, LocalPath: root},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -295,10 +298,10 @@ func TestWalk_RedundantSubPluginAbsorbed(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"egonex-ai/understand-anything": inner}}
-	cat, err := Walk(
+	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		ParsedSource{Type: Local, LocalPath: root},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -311,3 +314,58 @@ func TestWalk_RedundantSubPluginAbsorbed(t *testing.T) {
 	assert.Equal(t, "explainer", ua.Skills[0].Name)
 }
 
+// TestWalk_DedupesSkillsByName verifies that when the same skill appears at
+// two different physical paths (e.g. once in the marketplace root and once
+// in a sub-plugin dir that the recursive BFS re-scans), the final Catalog
+// only shows one row. This regression test pins the dedup behavior that
+// prevents the "apple-calendar x2" UI bug.
+func TestWalk_DedupesSkillsByName(t *testing.T) {
+	base := t.TempDir()
+
+	// Root-level skills/apple-calendar (will be found by Scan of the root)
+	rootSkillDir := filepath.Join(base, "skills", "apple-calendar")
+	require.NoError(t, os.MkdirAll(rootSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(rootSkillDir, "SKILL.md"),
+		[]byte("# Apple Calendar\nFrom root."), 0o644))
+
+	// Sub-plugin with the same skill name (will be found by recursive BFS)
+	cpDir := filepath.Join(base, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(cpDir, 0o755))
+	marketplace := `{
+		"name": "dup-mp",
+		"plugins": [
+			{"name": "tools", "source": "./plugins/tools"}
+		]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(cpDir, "marketplace.json"), []byte(marketplace), 0o644))
+
+	pluginSkillDir := filepath.Join(base, "plugins", "tools", "skills", "apple-calendar")
+	require.NoError(t, os.MkdirAll(pluginSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginSkillDir, "SKILL.md"),
+		[]byte("# Apple Calendar\nFrom sub-plugin."), 0o644))
+
+	src, err := plugin.Parse(base)
+	require.NoError(t, err)
+	cat, err := utils.Walk(context.Background(), plugin.New(), src, 3)
+	require.NoError(t, err)
+	require.NotEmpty(t, cat.Roots)
+
+	// Walk the whole tree and count "apple-calendar" occurrences.
+	count := 0
+	var walk func(n *plugin.Category)
+	walk = func(n *plugin.Category) {
+		for _, s := range n.Skills {
+			if s.Name == "apple-calendar" {
+				count++
+			}
+		}
+		for _, ch := range n.Children {
+			walk(ch)
+		}
+	}
+	for _, r := range cat.Roots {
+		walk(r)
+	}
+	assert.Equal(t, 1, count,
+		"apple-calendar must appear exactly once even though it exists at two physical paths")
+}

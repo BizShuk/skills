@@ -5,6 +5,7 @@ package agent
 
 import (
 	"os"
+	"path/filepath"
 )
 
 // AgentType is the canonical name of one supported agent (e.g. "claude-code").
@@ -66,4 +67,15 @@ func Detect() []Agent {
 		found = append(found, a)
 	}
 	return found
+}
+
+// SkillNameFromPath returns the basename of a skill path (the directory name).
+func SkillNameFromPath(path string) string {
+	return filepath.Base(path)
+}
+
+// SubagentNameFromPath returns the basename of a subagent path (the .md filename
+// without its parent directory).
+func SubagentNameFromPath(path string) string {
+	return filepath.Base(path)
 }

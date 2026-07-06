@@ -1,24 +1,13 @@
-// Package plugin provides the plugin loading subsystem: source parsing,
-// materialization, manifest scanning, and breadth-first tree walking to
-// produce a Catalog of skill categories.
 package plugin
 
-import (
-	"context"
-	"fmt"
-	"path/filepath"
-	"strings"
-	"sync"
+import "github.com/bizshuk/skills/model"
 
-	"golang.org/x/sync/errgroup"
-)
-
-// Category is one node in the plugin tree. Skills are the direct leaves of
-// this node; Children are nested remote plugins fetched during discovery
-// and surfaced as sub-trees. The OwnerRepo is empty for the root of the
-// walk and for purely local categories; remote plugins carry the
-// lowercased "owner/repo" so the TUI can render provenance and so the
-// visited set can dedupe repeats.
+// Category is one node in the plugin tree. Skills and Subagents are the
+// direct leaves of this node; Children are nested remote plugins fetched
+// during discovery and surfaced as sub-trees. The OwnerRepo is empty for
+// the root of the walk and for purely local categories; remote plugins
+// carry the lowercased "owner/repo" so the TUI can render provenance and
+// so the visited set can dedupe repeats.
 //
 // FetchOK is true when either the local scan succeeded (Locals case) or
 // the remote fetch returned a usable directory. FetchErr is non-empty
@@ -27,7 +16,8 @@ import (
 type Category struct {
 	PluginName string
 	OwnerRepo  string
-	Skills     []Skill
+	Skills     []model.Skill
+	Subagents  []model.Subagent
 	Children   []*Category // sub-plugins (empty for leaf nodes)
 	FetchOK    bool
 	FetchErr   string
@@ -44,11 +34,11 @@ type Catalog struct {
 // nested — flattened into one slice. The TUI's --yes (non-interactive)
 // branch and any other consumer that wants "every skill" without caring
 // about the tree shape use this helper.
-func (c *Catalog) AllSkills() []Skill {
+func (c *Catalog) AllSkills() []model.Skill {
 	if c == nil {
 		return nil
 	}
-	var out []Skill
+	var out []model.Skill
 	var walk func(n *Category)
 	walk = func(n *Category) {
 		if n == nil {
@@ -65,171 +55,28 @@ func (c *Catalog) AllSkills() []Skill {
 	return out
 }
 
-// queueEntry is one unit of work in the BFS queue: a parent pointer (nil
-// for the initial root materialization), the materialized directory to
-// scan, and the depth at which that directory was reached (0 for root).
-type queueEntry struct {
-	parent *Category
-	dir    string
-	depth  int
-}
-
-// Walk materializes root, then performs a level-by-level BFS over its
-// plugins. At each level every queued entry is scanned with Scan;
-// local plugins attach Categories immediately (under their parent, or to
-// Roots when parent is nil); remote plugins are fetched in parallel (via
-// errgroup) and either attached as a Category placeholder (whose Children
-// will be filled by the next BFS level) on success, or as a failed
-// Category on error. The visited set, keyed on the lowercased ownerRepo,
-// prevents both infinite loops and duplicate fetches. Remote plugins
-// whose would-be depth exceeds maxDepth are silently dropped per the
-// design's "depth > maxDepth 停止走訪" semantics — no placeholder
-// Category is created for them.
-//
-// The only error path is failure to materialize root itself; every other
-// failure (malformed manifest, unreachable remote) is recorded on the
-// relevant Category and the walk continues.
-func Walk(ctx context.Context, f Fetcher, root ParsedSource, maxDepth int) (*Catalog, error) {
-	rootDir, err := f.Materialize(ctx, root)
-	if err != nil {
-		return nil, fmt.Errorf("materialize root: %w", err)
+// AllSubagents walks the tree in preorder and returns every Subagent
+// flattened into one slice. Consumers that want "every subagent" without
+// caring about the tree shape (e.g. --yes mode) use this helper.
+func (c *Catalog) AllSubagents() []model.Subagent {
+	if c == nil {
+		return nil
 	}
-
-	cat := &Catalog{}
-	visited := map[string]bool{}
-	queue := []queueEntry{{parent: nil, dir: rootDir, depth: 0}}
-
-	for len(queue) > 0 {
-		// Snapshot the current level and reset the queue for the next pass.
-		// All goroutines on this level append into a fresh `queue`, so by
-		// the time g.Wait returns the next level is fully populated.
-		level := queue
-		queue = nil
-
-		var (
-			rootMu sync.Mutex // protects cat.Roots
-			nextMu sync.Mutex // protects `queue`
-		)
-		g, gctx := errgroup.WithContext(ctx)
-
-		for _, n := range level {
-			n := n
-			g.Go(func() error {
-				parsed, err := Scan(n.dir)
-				if err != nil {
-					// Malformed manifest — drop the whole node silently per
-					// the spec's error handling rules.
-					return nil
-				}
-
-				// A local plugin whose base IS the scanned dir is the repo's
-				// own root plugin. When we reached this dir by fetching a
-				// remote placeholder (n.parent != nil), that root plugin and
-				// the placeholder are the same plugin: absorb its skills into
-				// the placeholder instead of nesting a same-repo child one
-				// level deeper (which showed as a redundant "gosdk → gosdk"
-				// layer). Sub-directory plugins — the genuine members of a
-				// multi-plugin marketplace — still nest normally below.
-				dirKey := filepath.Clean(n.dir)
-				if abs, aerr := filepath.Abs(n.dir); aerr == nil {
-					dirKey = filepath.Clean(abs)
-				}
-
-				// Local plugins: each one becomes a Category with its skills,
-				// attached under the current parent (or to Roots when this
-				// level is the walk's root).
-				for _, lp := range parsed.Locals {
-					if n.parent != nil && (filepath.Clean(lp.Base) == dirKey || strings.EqualFold(lp.Name, n.parent.PluginName)) {
-						rootMu.Lock()
-						n.parent.Skills = append(n.parent.Skills, lp.Skills...)
-						rootMu.Unlock()
-						continue
-					}
-					c := &Category{PluginName: lp.Name, FetchOK: true}
-					c.Skills = append(c.Skills, lp.Skills...)
-					rootMu.Lock()
-					if n.parent == nil {
-						cat.Roots = append(cat.Roots, c)
-					} else {
-						n.parent.Children = append(n.parent.Children, c)
-					}
-					rootMu.Unlock()
-				}
-
-				// Remote plugins: visit-gate, depth-gate, then fetch.
-				for _, rp := range parsed.Remotes {
-					key := strings.ToLower(rp.OwnerRepo)
-
-					rootMu.Lock()
-					if visited[key] {
-						rootMu.Unlock()
-						continue
-					}
-					visited[key] = true
-					rootMu.Unlock()
-
-					if n.depth+1 > maxDepth {
-						// Per design spec §Recursion Semantics: simply stop
-						// walking past this plugin. No placeholder Category.
-						continue
-					}
-
-					srcURL := rp.URL
-					if srcURL == "" {
-						srcURL = "https://github.com/" + rp.OwnerRepo + ".git"
-					}
-					src := ParsedSource{
-						Type: GitHub,
-						URL:  srcURL,
-						Ref:  rp.Ref,
-					}
-
-					dir, ferr := f.Materialize(gctx, src)
-					if ferr != nil {
-						rootMu.Lock()
-						failed := &Category{
-							PluginName: rp.Name,
-							OwnerRepo:  rp.OwnerRepo,
-							FetchOK:    false,
-							FetchErr:   "unable to fetch",
-						}
-						if n.parent == nil {
-							cat.Roots = append(cat.Roots, failed)
-						} else {
-							n.parent.Children = append(n.parent.Children, failed)
-						}
-						rootMu.Unlock()
-						continue
-					}
-
-					// Successful fetch: surface the plugin as a Category
-					// placeholder under its parent (whose Children will be
-					// filled at the next BFS level once we scan its dir)
-					// and enqueue the fetched dir for further discovery.
-					placeholder := &Category{
-						PluginName: rp.Name,
-						OwnerRepo:  rp.OwnerRepo,
-						FetchOK:    true,
-					}
-					rootMu.Lock()
-					if n.parent == nil {
-						cat.Roots = append(cat.Roots, placeholder)
-					} else {
-						n.parent.Children = append(n.parent.Children, placeholder)
-					}
-					rootMu.Unlock()
-
-					nextMu.Lock()
-					queue = append(queue, queueEntry{parent: placeholder, dir: dir, depth: n.depth + 1})
-					nextMu.Unlock()
-				}
-				return nil
-			})
+	var out []model.Subagent
+	var walk func(n *Category)
+	walk = func(n *Category) {
+		if n == nil {
+			return
 		}
-		if err := g.Wait(); err != nil {
-			return cat, err
+		out = append(out, n.Subagents...)
+		for _, ch := range n.Children {
+			walk(ch)
 		}
 	}
-
-	return cat, nil
+	for _, r := range c.Roots {
+		walk(r)
+	}
+	return out
 }
+
+

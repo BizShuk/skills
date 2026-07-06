@@ -1,3 +1,5 @@
 # TODO
 
+- [ ] Create model package for types.go
+- [x] Add subagent
 - [ ] Add auto update

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/bizshuk/skills/model"
 )
 
 // Scan reads the .claude-plugin/marketplace.json and .claude-plugin/plugin.json
@@ -15,34 +17,36 @@ import (
 // Path traversal: every computed path derived from manifest data must be
 // contained within base. Any path that escapes base (e.g. via "../") is
 // silently dropped so a bad manifest entry cannot reach past the base dir.
-func Scan(base string) (Parsed, error) {
+func Scan(base string) (model.Parsed, error) {
 	absBase, err := filepath.Abs(base)
 	if err != nil {
-		return Parsed{}, err
+		return model.Parsed{}, err
 	}
-	var out Parsed
+	var out model.Parsed
 	if err := scanMarketplace(absBase, &out); err != nil {
-		return Parsed{}, err
+		return model.Parsed{}, err
 	}
 	if err := scanPluginAtBase(absBase, &out); err != nil {
-		return Parsed{}, err
+		return model.Parsed{}, err
 	}
 	if err := scanSkillJsonAtBase(absBase, &out); err != nil {
-		return Parsed{}, err
+		return model.Parsed{}, err
 	}
 	out.Locals = dedupeLocalsByBase(out.Locals)
 	return out, nil
 }
 
 // scanSkillJsonAtBase reads `<base>/skill.json` (legacy/alternative plugin format)
-// and appends it to out as a LocalPlugin whose Base is base itself.
-func scanSkillJsonAtBase(base string, out *Parsed) error {
+// and appends it to out as a model.LocalPlugin whose Base is base itself.
+func scanSkillJsonAtBase(base string, out *model.Parsed) error {
 	data, err := os.ReadFile(filepath.Join(base, "skill.json"))
 	if err != nil {
 		return nil
 	}
 	var mf struct {
-		Name string `json:"name"`
+		Name           string   `json:"name"`
+		Agents         []string `json:"agents"`
+		TopLevelAgents bool     `json:"topLevelAgents"`
 	}
 	if err := json.Unmarshal(data, &mf); err != nil {
 		return nil
@@ -50,7 +54,7 @@ func scanSkillJsonAtBase(base string, out *Parsed) error {
 	if mf.Name == "" {
 		return nil
 	}
-	lp := LocalPlugin{Name: mf.Name, Base: base}
+	lp := model.LocalPlugin{Name: mf.Name, Base: base, TopLevelAgents: mf.TopLevelAgents, AgentPaths: mf.Agents}
 	scanSkills(base, &lp, nil)
 	out.Locals = append(out.Locals, lp)
 	return nil
@@ -63,9 +67,9 @@ func scanSkillJsonAtBase(base string, out *Parsed) error {
 // first occurrence (marketplace before plugin.json) yields one category.
 // Distinct bases — real sub-plugins under different subdirs — are preserved in
 // their original order.
-func dedupeLocalsByBase(locals []LocalPlugin) []LocalPlugin {
+func dedupeLocalsByBase(locals []model.LocalPlugin) []model.LocalPlugin {
 	seen := make(map[string]bool, len(locals))
-	out := make([]LocalPlugin, 0, len(locals))
+	out := make([]model.LocalPlugin, 0, len(locals))
 	for _, lp := range locals {
 		key := filepath.Clean(lp.Base)
 		if seen[key] {
@@ -81,7 +85,9 @@ func dedupeLocalsByBase(locals []LocalPlugin) []LocalPlugin {
 type marketplacePlugin struct {
 	Name   string          `json:"name"`
 	Source json.RawMessage `json:"source"` // string | remote-object
-	Skills []string        `json:"skills"`
+	Skills          []string `json:"skills"`
+	Agents          []string `json:"agents"`
+	TopLevelAgents  bool     `json:"topLevelAgents"`
 }
 
 type marketplaceManifest struct {
@@ -93,13 +99,15 @@ type marketplaceManifest struct {
 
 type pluginManifest struct {
 	Name   string   `json:"name"`
-	Skills []string `json:"skills"`
+	Skills           []string `json:"skills"`
+	Agents           []string `json:"agents"`
+	TopLevelAgents   bool     `json:"topLevelAgents"`
 }
 
 // scanMarketplace reads `<base>/.claude-plugin/marketplace.json` (if present)
 // and appends each plugin entry to out. Missing files and malformed JSON are
 // silently ignored per the design spec.
-func scanMarketplace(base string, out *Parsed) error {
+func scanMarketplace(base string, out *model.Parsed) error {
 	data, err := os.ReadFile(filepath.Join(base, ".claude-plugin", "marketplace.json"))
 	if err != nil {
 		return nil
@@ -146,7 +154,7 @@ func scanMarketplace(base string, out *Parsed) error {
 		if !isContainedIn(pluginBase, base) {
 			continue
 		}
-		lp := LocalPlugin{Name: p.Name, Base: pluginBase}
+		lp := model.LocalPlugin{Name: p.Name, Base: pluginBase, TopLevelAgents: p.TopLevelAgents, AgentPaths: p.Agents}
 		scanSkills(base, &lp, p.Skills)
 		out.Locals = append(out.Locals, lp)
 	}
@@ -154,8 +162,8 @@ func scanMarketplace(base string, out *Parsed) error {
 }
 
 // scanPluginAtBase reads `<base>/.claude-plugin/plugin.json` (single plugin)
-// and appends it to out as a LocalPlugin whose Base is base itself.
-func scanPluginAtBase(base string, out *Parsed) error {
+// and appends it to out as a model.LocalPlugin whose Base is base itself.
+func scanPluginAtBase(base string, out *model.Parsed) error {
 	data, err := os.ReadFile(filepath.Join(base, ".claude-plugin", "plugin.json"))
 	if err != nil {
 		return nil
@@ -167,16 +175,16 @@ func scanPluginAtBase(base string, out *Parsed) error {
 	if mf.Name == "" {
 		return nil
 	}
-	lp := LocalPlugin{Name: mf.Name, Base: base}
+	lp := model.LocalPlugin{Name: mf.Name, Base: base, TopLevelAgents: mf.TopLevelAgents, AgentPaths: mf.Agents}
 	scanSkills(base, &lp, mf.Skills)
 	out.Locals = append(out.Locals, lp)
 	return nil
 }
 
-// classifyRemote maps the object form of `source` to a RemotePlugin.
+// classifyRemote maps the object form of `source` to a model.RemotePlugin.
 // Returns ok=false for unrecognized shapes or missing owner/repo info, so
 // the caller can drop the entry silently per the design spec.
-func classifyRemote(name string, obj map[string]any) (RemotePlugin, bool) {
+func classifyRemote(name string, obj map[string]any) (model.RemotePlugin, bool) {
 	srcType, _ := obj["source"].(string)
 	ref, _ := obj["ref"].(string)
 	_ = obj["sha"]
@@ -185,9 +193,9 @@ func classifyRemote(name string, obj map[string]any) (RemotePlugin, bool) {
 		repo, _ := obj["repo"].(string)
 		ownerRepo := normalizeOwnerRepo(repo)
 		if ownerRepo == "" {
-			return RemotePlugin{}, false
+			return model.RemotePlugin{}, false
 		}
-		return RemotePlugin{
+		return model.RemotePlugin{
 			Name:      name,
 			OwnerRepo: ownerRepo,
 			URL:       "https://github.com/" + ownerRepo + ".git",
@@ -197,17 +205,17 @@ func classifyRemote(name string, obj map[string]any) (RemotePlugin, bool) {
 		urlStr, _ := obj["url"].(string)
 		ownerRepo := deriveOwnerRepoFromURL(urlStr)
 		if ownerRepo == "" {
-			return RemotePlugin{}, false
+			return model.RemotePlugin{}, false
 		}
-		return RemotePlugin{Name: name, OwnerRepo: ownerRepo, URL: urlStr, Ref: ref}, true
+		return model.RemotePlugin{Name: name, OwnerRepo: ownerRepo, URL: urlStr, Ref: ref}, true
 	case "git-subdir":
 		urlStr, _ := obj["url"].(string)
 		subdir, _ := obj["path"].(string)
 		ownerRepo := deriveOwnerRepoFromURL(urlStr)
 		if ownerRepo == "" {
-			return RemotePlugin{}, false
+			return model.RemotePlugin{}, false
 		}
-		return RemotePlugin{
+		return model.RemotePlugin{
 			Name:      name,
 			OwnerRepo: ownerRepo,
 			URL:       urlStr,
@@ -215,7 +223,7 @@ func classifyRemote(name string, obj map[string]any) (RemotePlugin, bool) {
 			Subdir:    subdir,
 		}, true
 	}
-	return RemotePlugin{}, false
+	return model.RemotePlugin{}, false
 }
 
 // deriveOwnerRepoFromURL pulls an "owner/repo" pair out of a git URL. It
@@ -264,7 +272,7 @@ func normalizeOwnerRepo(repo string) string {
 // non-heading line of its SKILL.md (truncated to descMaxChars + "...").
 // Files that fail to read or have no body leave Description empty — the
 // TUI renders empty parens for those.
-func scanSkills(base string, lp *LocalPlugin, additive []string) {
+func scanSkills(base string, lp *model.LocalPlugin, additive []string) {
 	seen := map[string]bool{}
 
 	add := func(skillDir string) {
@@ -273,7 +281,7 @@ func scanSkills(base string, lp *LocalPlugin, additive []string) {
 		}
 		seen[skillDir] = true
 		desc := readDescription(filepath.Join(skillDir, "SKILL.md"))
-		lp.Skills = append(lp.Skills, Skill{
+		lp.Skills = append(lp.Skills, model.Skill{
 			Name:        filepath.Base(skillDir),
 			Path:        skillDir,
 			Description: desc,
@@ -318,6 +326,111 @@ func scanSkills(base string, lp *LocalPlugin, additive []string) {
 			continue
 		}
 		add(skillDir)
+	}
+
+	// Subagents: scan .md files under agents/ directories.
+	scanSubagents(lp)
+}
+
+// scanSubagents populates lp.Subagents from three sources, in order:
+//  1. The conventional agents/ subdirs (lp.Base/agents/, lp.Base/.claude/agents/,
+//     lp.Base/.agents/agents/) - always scanned.
+//  2. Top-level .md files in lp.Base - only when lp.TopLevelAgents is true (set
+//     via plugin.json's "topLevelAgents" field). This handles the "flat .md"
+//     layout (e.g. awesome-claude-code-subagents where each category is a dir
+//     of .md files) without auto-including unrelated top-level docs
+//     (README, CHANGELOG, etc.).
+//  3. Explicit AgentPaths from the manifest's "agents" array (e.g. plugin.json
+//     "agents": ["./python-pro.md"]). Paths are relative to lp.Base.
+//
+// All sources are deduped by Name (basename minus .md) so the same subagent
+// appearing in two sources shows up once in the TUI.
+func scanSubagents(lp *model.LocalPlugin) {
+	seenAgent := map[string]bool{}
+
+	add := func(name, p string) {
+		if name == "" || name == "README" {
+			return
+		}
+		if seenAgent[name] {
+			return
+		}
+		seenAgent[name] = true
+		lp.Subagents = append(lp.Subagents, model.Subagent{
+			Name:        name,
+			Path:        p,
+			Description: readDescription(p),
+		})
+	}
+
+	// Source 1: conventional agents/ subdirs.
+	agentDirs := []string{
+		filepath.Join(lp.Base, "agents"),
+		filepath.Join(lp.Base, ".claude", "agents"),
+		filepath.Join(lp.Base, ".agents", "agents"),
+	}
+	for _, ad := range agentDirs {
+		entries, err := os.ReadDir(ad)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			if e.Name() == "README.md" {
+				continue
+			}
+			name := strings.TrimSuffix(e.Name(), ".md")
+			add(name, filepath.Join(ad, e.Name()))
+		}
+	}
+
+	// Source 2: top-level .md files in lp.Base (opt-in).
+	if lp.TopLevelAgents {
+		if topEntries, terr := os.ReadDir(lp.Base); terr == nil {
+			for _, te := range topEntries {
+				if te.IsDir() {
+					continue
+				}
+				if !strings.HasSuffix(te.Name(), ".md") {
+					continue
+				}
+				if te.Name() == "README.md" {
+					continue
+				}
+				name := strings.TrimSuffix(te.Name(), ".md")
+				add(name, filepath.Join(lp.Base, te.Name()))
+			}
+		}
+	}
+
+	// Source 3: explicit AgentPaths from the manifest.
+	for _, ap := range lp.AgentPaths {
+		if ap == "" || !strings.HasSuffix(ap, ".md") {
+			continue
+		}
+		var resolved string
+		switch {
+		case strings.HasPrefix(ap, "./"), strings.HasPrefix(ap, "../"):
+			candidate := filepath.Join(lp.Base, ap)
+			if !isContainedIn(candidate, lp.Base) {
+				continue
+			}
+			resolved = candidate
+		case filepath.IsAbs(ap):
+			resolved = ap
+		default:
+			resolved = filepath.Join(lp.Base, ap)
+		}
+		if _, err := os.Stat(resolved); err != nil {
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(resolved), ".md")
+		add(name, resolved)
 	}
 }
 

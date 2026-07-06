@@ -142,4 +142,89 @@ func TestDetect_FindsExistingAgent(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "expected Detect() to include claude-code when $HOME/.claude exists")
+}// mkSubagentFile creates a single .md file at <base>/<name>.md with simple
+// content, returning the absolute path to the .md file. Mirrors mkSkillDir
+// but for flat subagent files (not directories).
+func mkSubagentFile(t *testing.T, base, name string) string {
+	t.Helper()
+	path := filepath.Join(base, name+".md")
+	require.NoError(t, os.WriteFile(path, []byte("# "+name+"\nA test subagent."), 0o644))
+	return path
+}
+
+// TestApply_SubagentProjectModeCopiesIntoAgentsDir verifies that when Global
+// is false the subagent .md file is copied under <Cwd>/<agent.ProjectAgentsDir>/<name>.md.
+func TestApply_SubagentProjectModeCopiesIntoAgentsDir(t *testing.T) {
+	cwd := t.TempDir()
+	src := t.TempDir()
+	saSrc := mkSubagentFile(t, src, "reviewer")
+
+	sel := Selection{
+		SubagentPaths: []string{saSrc},
+		AgentTypes:    []AgentType{"claude-code"},
+		Global:        false,
+		Cwd:           cwd,
+	}
+
+	require.NoError(t, Apply(sel))
+
+	// claude-code.ProjectAgentsDir = ".claude/agents"
+	dest := filepath.Join(cwd, ".claude", "agents", "reviewer.md")
+	_, err := os.Stat(dest)
+	assert.NoError(t, err, "expected reviewer.md at %s", dest)
+}
+
+// TestApply_SubagentGlobalModeCopiesIntoUserAgentsDir verifies that when
+// Global is true the subagent .md file is copied under the user-level agents dir.
+func TestApply_SubagentGlobalModeCopiesIntoUserAgentsDir(t *testing.T) {
+	homeDir := t.TempDir()
+	claudeDir := filepath.Join(homeDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	t.Setenv("HOME", homeDir)
+
+	src := t.TempDir()
+	saSrc := mkSubagentFile(t, src, "tester")
+
+	sel := Selection{
+		SubagentPaths: []string{saSrc},
+		AgentTypes:    []AgentType{"claude-code"},
+		Global:        true,
+	}
+
+	require.NoError(t, Apply(sel))
+
+	// claude-code.UserAgentsDir = ~/.claude/agents
+	dest := filepath.Join(homeDir, ".claude", "agents", "tester.md")
+	_, err := os.Stat(dest)
+	assert.NoError(t, err, "expected tester.md at %s", dest)
+}
+
+// TestApply_SkillAndSubagentTogether verifies that when both SkillPaths and
+// SubagentPaths are set in one Selection, skills land in the skills/ dir and
+// subagents land in the agents/ dir — no cross-contamination.
+func TestApply_SkillAndSubagentTogether(t *testing.T) {
+	cwd := t.TempDir()
+	src := t.TempDir()
+	skillSrc := mkSkillDir(t, src, "writer")
+	saSrc := mkSubagentFile(t, src, "reviewer")
+
+	sel := Selection{
+		SkillPaths:    []string{skillSrc},
+		SubagentPaths: []string{saSrc},
+		AgentTypes:    []AgentType{"claude-code"},
+		Global:        false,
+		Cwd:           cwd,
+	}
+
+	require.NoError(t, Apply(sel))
+
+	// Skill should be in skills dir
+	skillDest := filepath.Join(cwd, ".claude", "skills", "writer", "SKILL.md")
+	_, err := os.Stat(skillDest)
+	assert.NoError(t, err, "expected SKILL.md at %s", skillDest)
+
+	// Subagent should be in agents dir
+	saDest := filepath.Join(cwd, ".claude", "agents", "reviewer.md")
+	_, err = os.Stat(saDest)
+	assert.NoError(t, err, "expected reviewer.md at %s", saDest)
 }

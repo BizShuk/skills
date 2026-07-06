@@ -33,8 +33,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/bizshuk/skills/svc/plugin"
+	"github.com/bizshuk/skills/model"
 	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/svc/plugin"
 )
 
 // defaultViewportHeight is the number of body rows (headers + skills)
@@ -45,23 +46,24 @@ const defaultViewportHeight = 20
 // Style constants — lipgloss renders ANSI color codes; raw output stays legible
 // in terminals without ANSI support.
 var (
-	pluginHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
-	nestedHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("Green")).Bold(true)
-	fetchErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("Red"))
-	skillNameStyle     = lipgloss.NewStyle()
-	skillDescStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	checkedStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("Green"))
+	pluginHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true)
+	nestedHeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("Green")).Bold(true)
+	fetchErrStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("Red"))
+	skillNameStyle    = lipgloss.NewStyle()
+	skillDescStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	checkedStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("Green"))
+	subagentNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("171"))
 )
-
 
 // row is one visible line in the rendered tree. Headers and skills share
 // a row shape so the cursor / scroll logic can treat them uniformly; the
 // isHeader / skill fields disambiguate.
 type row struct {
 	node     *plugin.Category // non-nil for both header and skill rows
-	skill    *plugin.Skill    // nil for header rows, non-nil for skill rows
-	depth    int                // nesting depth (0 for top-level plugin headers)
-	isHeader bool               // true for category header rows, false for skill rows
+	skill    *model.Skill    // nil for header rows, non-nil for skill rows
+	subagent *model.Subagent // nil for header and skill rows, non-nil for subagent rows
+	depth    int              // nesting depth (0 for top-level plugin headers)
+	isHeader bool             // true for category header rows, false for skill rows
 }
 
 // phase values drive which screen the TUI renders.
@@ -98,11 +100,12 @@ type Model struct {
 	search      textinput.Model // inline search field
 	searchQuery string          // cached lower-cased trimmed query
 
-	global        bool
-	done          bool
-	folded        map[*plugin.Category]bool // fold state keyed by Category pointer
-	checked       map[string]bool             // checked state keyed by Skill.Path
-	skillUnfolded map[string]bool             // unfolded state keyed by Skill.Path
+	global          bool
+	done            bool
+	folded          map[*plugin.Category]bool // fold state keyed by Category pointer
+	checked         map[string]bool           // checked state keyed by Skill.Path
+	checkedSubagent map[string]bool           // checked state keyed by Subagent.Path
+	skillUnfolded   map[string]bool           // unfolded state keyed by Skill.Path
 
 	// Agent-phase fields.
 	phase       int        // phaseSkills, phaseAgents, or phaseLevel
@@ -130,14 +133,15 @@ type Model struct {
 // Agent phase: agents are shown in phase 2 with detected agents pre-checked.
 func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 	m := Model{
-		cat:            cat,
-		folded:         map[*plugin.Category]bool{},
-		checked:        map[string]bool{},
-		skillUnfolded:  map[string]bool{},
-		viewportHeight: defaultViewportHeight,
-		search:         textinput.New(),
-		phase:          phaseSkills,
-		agents:         makeAgents(agents),
+		cat:             cat,
+		folded:          map[*plugin.Category]bool{},
+		checked:         map[string]bool{},
+		checkedSubagent: map[string]bool{},
+		skillUnfolded:   map[string]bool{},
+		viewportHeight:  defaultViewportHeight,
+		search:          textinput.New(),
+		phase:           phaseSkills,
+		agents:          makeAgents(agents),
 	}
 	m.search.Prompt = ""
 	m.search.Placeholder = ""
@@ -236,6 +240,17 @@ func (m *Model) rebuildVisible() {
 			}
 		}
 
+		// Also check subagents for direct matches (search visibility).
+		subagentDirectMatch := q == ""
+		if q != "" {
+			for i := range c.Subagents {
+				if subagentMatchesQuery(&c.Subagents[i], q) {
+					subagentDirectMatch = true
+					break
+				}
+			}
+		}
+
 		// Walk children first; remember where their rows start so we can
 		// either splice our own rows in front or drop them entirely.
 		childStart := len(out)
@@ -244,7 +259,7 @@ func (m *Model) rebuildVisible() {
 		}
 		childCount := len(out) - childStart
 
-		include := q == "" || headerSelfMatch || skillDirectMatch || childCount > 0
+		include := q == "" || headerSelfMatch || skillDirectMatch || subagentDirectMatch || childCount > 0
 		if !include {
 			// Children contributed nothing meaningful (their subtrees were
 			// also filtered out). Trim their rows from the accumulator.
@@ -254,13 +269,19 @@ func (m *Model) rebuildVisible() {
 
 		// Build this node's self-rows: header (always), then skills (only
 		// when expanded and matching).
-		self := make([]row, 0, 1+len(c.Skills))
+		self := make([]row, 0, 1+len(c.Skills)+len(c.Subagents))
 		self = append(self, row{node: c, depth: depth, isHeader: true})
 		if !m.folded[c] {
 			for i := range c.Skills {
 				s := &c.Skills[i]
 				if q == "" || skillMatchesQuery(s, q) {
 					self = append(self, row{node: c, skill: s, depth: depth + 1})
+				}
+			}
+			for i := range c.Subagents {
+				sa := &c.Subagents[i]
+				if q == "" || subagentMatchesQuery(sa, q) {
+					self = append(self, row{node: c, subagent: sa, depth: depth + 1})
 				}
 			}
 		}
@@ -290,7 +311,7 @@ func (m *Model) rebuildVisible() {
 // skillMatchesQuery reports whether the skill's name OR description
 // contains the lower-cased trimmed query. An empty query matches every
 // skill (caller should already short-circuit).
-func skillMatchesQuery(s *plugin.Skill, q string) bool {
+func skillMatchesQuery(s *model.Skill, q string) bool {
 	if q == "" {
 		return true
 	}
@@ -298,6 +319,22 @@ func skillMatchesQuery(s *plugin.Skill, q string) bool {
 		return true
 	}
 	if strings.Contains(strings.ToLower(s.Description), q) {
+		return true
+	}
+	return false
+}
+
+// subagentMatchesQuery reports whether the subagent's name OR description
+// contains the lower-cased trimmed query. An empty query matches every
+// subagent (caller should already short-circuit).
+func subagentMatchesQuery(sa *model.Subagent, q string) bool {
+	if q == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(sa.Name), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(sa.Description), q) {
 		return true
 	}
 	return false
@@ -317,6 +354,12 @@ func (m Model) headerCheckState(c *plugin.Category) (all bool, partial bool) {
 		for _, s := range n.Skills {
 			total++
 			if m.checked[s.Path] {
+				checked++
+			}
+		}
+		for _, sa := range n.Subagents {
+			total++
+			if m.checkedSubagent[sa.Path] {
 				checked++
 			}
 		}
@@ -355,6 +398,9 @@ func (m *Model) toggleSubtree(c *plugin.Category) {
 		}
 		for _, s := range n.Skills {
 			m.checked[s.Path] = target
+		}
+		for _, sa := range n.Subagents {
+			m.checkedSubagent[sa.Path] = target
 		}
 		for _, ch := range n.Children {
 			walk(ch)
@@ -568,16 +614,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleSubtree(r.node)
 		} else if r.skill != nil {
 			m.checked[r.skill.Path] = !m.checked[r.skill.Path]
+		} else if r.subagent != nil {
+			m.checkedSubagent[r.subagent.Path] = !m.checkedSubagent[r.subagent.Path]
 		}
 	case tea.KeyRight:
 		r := m.rows[m.cursor]
 		if r.isHeader {
-			if m.folded[r.node] {
-				delete(m.folded, r.node)
+			// Toggle fold on any header that has any descendants (children, skills, or
+			// subagents). The cascade helpers handle all three uniformly.
+			if len(r.node.Children) > 0 || len(r.node.Skills) > 0 || len(r.node.Subagents) > 0 {
+				if m.folded[r.node] {
+					unfoldSubtree(r.node, &m.folded)
+				} else {
+					foldSubtree(r.node, &m.folded)
+				}
 				m.rebuildVisible()
 				m.ensureCursorVisible()
 			}
-		} else {
+		} else if r.skill != nil {
 			if len([]rune(r.skill.Description)) > 60 {
 				m.skillUnfolded[r.skill.Path] = true
 			} else {
@@ -589,11 +643,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		r := m.rows[m.cursor]
 		if r.isHeader {
 			if !m.folded[r.node] {
-				m.folded[r.node] = true
+				foldSubtree(r.node, &m.folded)
 				m.rebuildVisible()
 				m.ensureCursorVisible()
 			}
-		} else {
+		} else if r.skill != nil {
 			if m.skillUnfolded[r.skill.Path] {
 				delete(m.skillUnfolded, r.skill.Path)
 			} else {
@@ -638,6 +692,8 @@ const (
 	glyphUnchecked     = "○"
 	glyphChecked       = "●"
 	glyphIndeterminate = "▣"
+	glyphSAUnchecked   = "◇" // ◇ diamond, hollow — unchecked subagent
+	glyphSAChecked     = "◆" // ◆ diamond, filled — checked subagent
 )
 
 // View renders the tree. The header order matches the spec:
@@ -647,7 +703,7 @@ const (
 //	↑↓ move, space select, enter confirm
 //	(blank)
 //	<body rows, clipped to viewportHeight, plus "↓ N more" if off-screen>
-func (m Model) countSummary() (totalPlugins, remotePlugins, totalSkills, remoteSkills int) {
+func (m Model) countSummary() (totalPlugins, remotePlugins, totalSkills, remoteSkills, totalSubagents int) {
 	var walk func(c *plugin.Category)
 	walk = func(c *plugin.Category) {
 		if c == nil {
@@ -661,6 +717,7 @@ func (m Model) countSummary() (totalPlugins, remotePlugins, totalSkills, remoteS
 		if c.OwnerRepo != "" {
 			remoteSkills += len(c.Skills)
 		}
+		totalSubagents += len(c.Subagents)
 		for _, ch := range c.Children {
 			walk(ch)
 		}
@@ -692,8 +749,8 @@ func (m Model) View() string {
 
 	var b strings.Builder
 	b.WriteString("Select skills to install\n")
-	tp, rp, ts, rs := m.countSummary()
-	b.WriteString(fmt.Sprintf("Plugins: %d (%d remote), Skills: %d (%d remote)\n", tp, rp, ts, rs))
+	tp, rp, ts, rs, tsa := m.countSummary()
+	b.WriteString(fmt.Sprintf("Plugins: %d (%d remote), Skills: %d (%d remote), Subagents: %d\n", tp, rp, ts, rs, tsa))
 	b.WriteString("Search: ")
 	b.WriteString(m.search.View())
 	b.WriteString("\n")
@@ -751,32 +808,51 @@ func (m Model) View() string {
 			continue
 		}
 
-		box := glyphUnchecked
-		if m.checked[r.skill.Path] {
-			box = checkedStyle.Render(glyphChecked)
-		}
-		var desc string
-		isLong := len([]rune(r.skill.Description)) > 60
-		unfolded := isLong && m.skillUnfolded[r.skill.Path]
+		// Skill row rendering.
+		if r.skill != nil {
+			box := glyphUnchecked
+			if m.checked[r.skill.Path] {
+				box = checkedStyle.Render(glyphChecked)
+			}
+			var desc string
+			isLong := len([]rune(r.skill.Description)) > 60
+			unfolded := isLong && m.skillUnfolded[r.skill.Path]
 
-		if r.skill.Description != "" {
-			if isLong {
-				if !unfolded {
-					desc = " — " + truncateRune(r.skill.Description, 60)
+			if r.skill.Description != "" {
+				if isLong {
+					if !unfolded {
+						desc = " — " + truncateRune(r.skill.Description, 60)
+					}
+				} else {
+					desc = " — " + r.skill.Description
 				}
-			} else {
-				desc = " — " + r.skill.Description
 			}
+
+			b.WriteString(fmt.Sprintf("%s%s%s %s%s\n", indent, cursor, box, r.skill.Name, desc))
+
+			if unfolded {
+				wrappedLines := wrapText(r.skill.Description, 80)
+				descIndent := indent + "      "
+				for _, line := range wrappedLines {
+					b.WriteString(fmt.Sprintf("%s%s\n", descIndent, skillDescStyle.Render(line)))
+				}
+			}
+			continue
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s%s %s%s\n", indent, cursor, box, r.skill.Name, desc))
-
-		if unfolded {
-			wrappedLines := wrapText(r.skill.Description, 80)
-			descIndent := indent + "      "
-			for _, line := range wrappedLines {
-				b.WriteString(fmt.Sprintf("%s%s\n", descIndent, skillDescStyle.Render(line)))
+		// Subagent row rendering: diamond icon (◇/◆), purple name.
+		if r.subagent != nil {
+			box := glyphSAUnchecked
+			if m.checkedSubagent[r.subagent.Path] {
+				box = checkedStyle.Render(glyphSAChecked)
 			}
+			var desc string
+			if r.subagent.Description != "" {
+				desc = " — " + r.subagent.Description
+			}
+			b.WriteString(fmt.Sprintf("%s%s%s %s%s\n",
+				indent, cursor, box, subagentNameStyle.Render(r.subagent.Name), desc))
+			continue
 		}
 	}
 
@@ -796,13 +872,19 @@ func (m Model) Selection() agent.Selection {
 			paths = append(paths, path)
 		}
 	}
+	saPaths := make([]string, 0, len(m.checkedSubagent))
+	for path, ok := range m.checkedSubagent {
+		if ok {
+			saPaths = append(saPaths, path)
+		}
+	}
 	agentTypes := make([]agent.AgentType, 0)
 	for _, a := range m.agents {
 		if a.checked {
 			agentTypes = append(agentTypes, a.agent.Type)
 		}
 	}
-	return agent.Selection{SkillPaths: paths, AgentTypes: agentTypes, Global: m.global}
+	return agent.Selection{SkillPaths: paths, SubagentPaths: saPaths, AgentTypes: agentTypes, Global: m.global}
 }
 
 // viewAgents renders the agent-selection phase.
@@ -935,4 +1017,30 @@ func wrapText(text string, width int) []string {
 		lines = append(lines, currentLine)
 	}
 	return lines
+}
+// unfoldSubtree removes the fold entry for c and recursively for all its
+// descendants. The next rebuildVisible() will then show the entire subtree
+// expanded. This implements the "expand parent fully" UX: pressing Right on
+// a category header should make its contents visible, not leave them gated
+// behind each descendant's own (still-folded) state.
+func unfoldSubtree(c *plugin.Category, folded *map[*plugin.Category]bool) {
+	if c == nil || folded == nil {
+		return
+	}
+	delete(*folded, c)
+	for _, ch := range c.Children {
+		unfoldSubtree(ch, folded)
+	}
+}
+
+// foldSubtree marks c and all its descendants as folded, then schedules a
+// rebuildVisible() so the collapsed tree is rendered.
+func foldSubtree(c *plugin.Category, folded *map[*plugin.Category]bool) {
+	if c == nil || folded == nil {
+		return
+	}
+	(*folded)[c] = true
+	for _, ch := range c.Children {
+		foldSubtree(ch, folded)
+	}
 }

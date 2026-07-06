@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bizshuk/skills/model"
 	"github.com/bizshuk/skills/svc/agent"
 	"github.com/bizshuk/skills/svc/plugin"
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,7 +27,7 @@ func sampleCatalog() *plugin.Catalog {
 			{
 				PluginName: "docs",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "writer", Path: "/x/writer"},
 				},
 			},
@@ -49,7 +50,7 @@ func twoSkillCatalog() *plugin.Catalog {
 			{
 				PluginName: "docs",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "writer", Path: "/x/writer"},
 					{Name: "reader", Path: "/x/reader"},
 				},
@@ -72,7 +73,7 @@ func oneNestedCatalog() *plugin.Catalog {
 					{
 						PluginName: "inner",
 						FetchOK:    true,
-						Skills:     []plugin.Skill{{Name: "helper", Path: "/p/helper"}},
+						Skills:     []model.Skill{{Name: "helper", Path: "/p/helper"}},
 					},
 				},
 			},
@@ -154,7 +155,7 @@ func TestSpaceOnCategoryHeaderChecksAllDescendants(t *testing.T) {
 			{
 				PluginName: "docs",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "writer", Path: "/x/writer"},
 					{Name: "reader", Path: "/x/reader"},
 				},
@@ -208,12 +209,12 @@ func TestSpaceOnCategoryHeaderChecksNestedSubtree(t *testing.T) {
 			{
 				PluginName: "outer",
 				FetchOK:    true,
-				Skills:     []plugin.Skill{{Name: "root-skill", Path: "/p/root"}},
+				Skills:     []model.Skill{{Name: "root-skill", Path: "/p/root"}},
 				Children: []*plugin.Category{
 					{
 						PluginName: "inner",
 						FetchOK:    true,
-						Skills:     []plugin.Skill{{Name: "nested-skill", Path: "/p/nested"}},
+						Skills:     []model.Skill{{Name: "nested-skill", Path: "/p/nested"}},
 					},
 				},
 			},
@@ -270,7 +271,7 @@ func TestSearchFiltersRows(t *testing.T) {
 			{
 				PluginName: "alpha",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "apple", Path: "/x/apple"},
 					{Name: "zulu", Path: "/x/zulu"},
 				},
@@ -278,12 +279,12 @@ func TestSearchFiltersRows(t *testing.T) {
 			{
 				PluginName: "beta",
 				FetchOK:    true,
-				Skills:     []plugin.Skill{{Name: "charlie", Path: "/x/charlie"}},
+				Skills:     []model.Skill{{Name: "charlie", Path: "/x/charlie"}},
 			},
 			{
 				PluginName: "gamma",
 				FetchOK:    true,
-				Skills:     []plugin.Skill{{Name: "delta", Path: "/x/delta"}},
+				Skills:     []model.Skill{{Name: "delta", Path: "/x/delta"}},
 			},
 		},
 	}
@@ -315,7 +316,7 @@ func TestSearchClearsOnEsc(t *testing.T) {
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "alpha", Path: "/x/alpha"},
 					{Name: "beta", Path: "/x/beta"},
 				},
@@ -358,7 +359,7 @@ func TestViewportClipsToHeight(t *testing.T) {
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "s1", Path: "/x/s1"},
 					{Name: "s2", Path: "/x/s2"},
 					{Name: "s3", Path: "/x/s3"},
@@ -394,7 +395,7 @@ func TestDescriptionRendered(t *testing.T) {
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{Name: "shorty", Path: "/x/shorty",
 						Description: "Use when fooing the bar"},
 					{Name: "emptyy", Path: "/x/emptyy",
@@ -423,10 +424,10 @@ func TestCursorStaysVisible(t *testing.T) {
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: func() []plugin.Skill {
-					out := make([]plugin.Skill, 11)
+				Skills: func() []model.Skill {
+					out := make([]model.Skill, 11)
 					for i := range out {
-						out[i] = plugin.Skill{
+						out[i] = model.Skill{
 							Name:        fmt.Sprintf("s%02d", i+1),
 							Path:        fmt.Sprintf("/x/s%02d", i+1),
 							Description: ".",
@@ -639,13 +640,13 @@ func TestRemoteRootPluginsAreFoldedByDefault(t *testing.T) {
 			{
 				PluginName: "local-plugin",
 				FetchOK:    true,
-				Skills:     []plugin.Skill{{Name: "local-skill", Path: "/p/local"}},
+				Skills:     []model.Skill{{Name: "local-skill", Path: "/p/local"}},
 			},
 			{
 				PluginName: "remote-plugin",
 				OwnerRepo:  "owner/repo",
 				FetchOK:    true,
-				Skills:     []plugin.Skill{{Name: "remote-skill", Path: "/p/remote"}},
+				Skills:     []model.Skill{{Name: "remote-skill", Path: "/p/remote"}},
 			},
 		},
 	}
@@ -665,7 +666,7 @@ func TestSkillDescriptionFoldUnfold(t *testing.T) {
 			{
 				PluginName: "p1",
 				FetchOK:    true,
-				Skills: []plugin.Skill{
+				Skills: []model.Skill{
 					{
 						Name:        "long-skill",
 						Path:        "/p/long",
@@ -700,3 +701,255 @@ func TestSkillDescriptionFoldUnfold(t *testing.T) {
 
 
 
+// subagentCatalog is a fixture with one skill and one subagent.
+func subagentCatalog() *plugin.Catalog {
+	return &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "p1",
+				FetchOK:    true,
+				Skills:     []model.Skill{{Name: "writer", Path: "/x/writer"}},
+				Subagents:  []model.Subagent{{Name: "reviewer", Path: "/x/reviewer.md", Description: "Review PRs"}},
+			},
+		},
+	}
+}
+
+// TestSubagentDistinctIcon verifies subagent rows render with the diamond
+// (◇) icon instead of the circle (○) used for skills.
+func TestSubagentDistinctIcon(t *testing.T) {
+	m := NewModel(subagentCatalog(), nil)
+	view := m.View()
+	assert.Contains(t, view, "◇", "subagent should render with hollow diamond icon")
+	assert.Contains(t, view, "reviewer", "subagent name should be visible")
+}
+
+// TestHeaderToggleAlsoTogglesSubagents verifies that pressing Space on a
+// category header checks both skills AND subagents under that category.
+func TestHeaderToggleAlsoTogglesSubagents(t *testing.T) {
+	m := NewModel(subagentCatalog(), nil)
+	updated := mustModel(t, sendKey(m, tea.KeySpace))
+	sel := updated.Selection()
+	assert.Contains(t, sel.SkillPaths, "/x/writer", "Space on header should check the skill")
+	assert.Contains(t, sel.SubagentPaths, "/x/reviewer.md", "Space on header should check the subagent")
+}
+
+// TestSubagentSelectionSpaceOnRow verifies pressing Space directly on a
+// subagent row toggles it individually, without affecting skills.
+func TestSubagentSelectionSpaceOnRow(t *testing.T) {
+	m := NewModel(subagentCatalog(), nil)
+	// Cursor 0 = header, cursor 1 = skill writer, cursor 2 = subagent reviewer
+	// Move cursor to row 2 (subagent reviewer)
+	m2 := mustModel(t, sendKey(m, tea.KeyDown))  // row 1: skill
+	m3 := mustModel(t, sendKey(m2, tea.KeyDown)) // row 2: subagent
+	require.Equal(t, 2, m3.cursor)
+	// Space on subagent row
+	m4 := mustModel(t, sendKey(m3, tea.KeySpace))
+	sel := m4.Selection()
+	assert.Empty(t, sel.SkillPaths, "skill should still be unchecked")
+	assert.Contains(t, sel.SubagentPaths, "/x/reviewer.md", "subagent should be checked")
+}
+
+// TestSubagentDescriptionRendered verifies subagent descriptions render
+// after the em-dash separator, same as skills.
+func TestSubagentDescriptionRendered(t *testing.T) {
+	m := NewModel(subagentCatalog(), nil)
+	view := m.View()
+	assert.Contains(t, view, "reviewer — Review PRs",
+		"subagent description should render after em-dash")
+}
+
+// TestNoSubagentDescriptionNoDash verifies a subagent with empty
+// description omits the em-dash, matching skill behavior.
+func TestNoSubagentDescriptionNoDash(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{{
+			PluginName: "p1",
+			FetchOK:    true,
+			Subagents:  []model.Subagent{{Name: "clean", Path: "/x/clean.md", Description: ""}},
+		}},
+	}
+	m := NewModel(cat, nil)
+	view := m.View()
+	assert.NotContains(t, view, "clean —",
+		"subagent with no description should not have em-dash")
+}
+
+// TestSearchMatchesSubagentName verifies search filtering works on
+// subagent names.
+func TestSearchMatchesSubagentName(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{{
+			PluginName: "tools",
+			FetchOK:    true,
+			Skills:     []model.Skill{{Name: "apple", Path: "/x/apple"}},
+			Subagents:  []model.Subagent{{Name: "code-reviewer", Path: "/x/cr.md", Description: "Check code"}},
+		}},
+	}
+	m := NewModel(cat, nil)
+	// Type "review" — should match subagent name
+	filtered := mustModel(t, typeRune(m, 'r'))
+	for _, r := range "eview" {
+		filtered = mustModel(t, typeRune(filtered, r))
+	}
+	view := filtered.View()
+	assert.Contains(t, view, "code-reviewer", "subagent matching search should be visible")
+	assert.NotContains(t, view, "apple", "non-matching skill should be hidden")
+}
+
+// TestSubagentCountSummary verifies the count summary line includes subagents.
+func TestSubagentCountSummary(t *testing.T) {
+	m := NewModel(subagentCatalog(), nil)
+	view := m.View()
+	assert.Contains(t, view, "Subagents: 1", "summary should count subagents")
+}
+
+// TestCascadeUnfold_ParentShowsAllDescendants verifies that pressing Right on
+// a folded parent category header cascades the unfold to all descendants, so
+// the user actually sees the contents (rather than just toggling the parent
+// state while each descendant remains independently folded and hides its
+// own children). This regression-pins the "second-level remote marketplace
+// can't fold/unfold" UX bug.
+func TestCascadeUnfold_ParentShowsAllDescendants(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "awesome-claude-code-subagents",
+				OwnerRepo:  "voltagent/awesome-claude-code-subagents",
+				FetchOK:    true,
+				Children: []*plugin.Category{
+					{PluginName: "voltagent-lang", FetchOK: true,
+						Subagents: []model.Subagent{
+							{Name: "python-pro", Path: "/tmp/x/python-pro.md"},
+						}},
+				},
+			},
+		},
+	}
+
+	m := NewModel(cat, nil)
+	view := m.View()
+	assert.NotContains(t, view, "python-pro", "subagent should be hidden initially (parent + child folded)")
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m2 := mustModel(t, out)
+	view2 := m2.View()
+	assert.Contains(t, view2, "python-pro",
+		"after Right on parent, the subagent should be visible (cascade unfold)")
+}
+
+// TestCascadeFold_ParentHidesAllDescendants verifies the inverse: pressing
+// Left on an expanded parent cascades the fold to all descendants.
+func TestCascadeFold_ParentHidesAllDescendants(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "awesome-claude-code-subagents",
+				OwnerRepo:  "voltagent/awesome-claude-code-subagents",
+				FetchOK:    true,
+				Children: []*plugin.Category{
+					{PluginName: "voltagent-lang", FetchOK: true,
+						Subagents: []model.Subagent{
+							{Name: "python-pro", Path: "/tmp/x/python-pro.md"},
+						}},
+				},
+			},
+		},
+	}
+
+	m := NewModel(cat, nil)
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m2 := mustModel(t, out)
+	view2 := m2.View()
+	assert.Contains(t, view2, "python-pro", "after Right, subagent visible")
+
+	out2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m3 := mustModel(t, out2)
+	view3 := m3.View()
+	assert.NotContains(t, view3, "python-pro",
+		"after Left on parent, subagent should be hidden again (cascade fold)")
+}
+
+// TestRight_TogglesFoldOnParent verifies that pressing Right on an
+// already-expanded parent header folds it back (toggle behavior). The first
+// Right unfolds, the second Right folds. This regression-pins the bug
+// where Right only worked in the unfold direction.
+func TestRight_TogglesFoldOnParent(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "awesome-claude-code-subagents",
+				OwnerRepo:  "voltagent/awesome-claude-code-subagents",
+				FetchOK:    true,
+				Children: []*plugin.Category{
+					{PluginName: "voltagent-lang", FetchOK: true,
+						Subagents: []model.Subagent{
+							{Name: "python-pro", Path: "/tmp/x/python-pro.md"},
+						}},
+				},
+			},
+		},
+	}
+
+	m := NewModel(cat, nil)
+	// 1st Right: unfold
+	out1, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m2 := mustModel(t, out1)
+	assert.Contains(t, m2.View(), "python-pro", "after 1st Right, subagent visible")
+
+	// 2nd Right: fold back
+	out2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m3 := mustModel(t, out2)
+	assert.NotContains(t, m3.View(), "python-pro", "after 2nd Right, subagent should be hidden again")
+
+	// 3rd Right: unfold again
+	out3, _ := m3.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m4 := mustModel(t, out3)
+	assert.Contains(t, m4.View(), "python-pro", "after 3rd Right, subagent visible again (toggle works)")
+}
+
+// TestLayer2_FoldToggle verifies the user-reported three-layer scenario:
+// pressing Right on the layer-2 remote marketplace (awesome-claude-code-subagents)
+// should fold/unfold it via cascade toggle. Layer-1 (cc-plugin) and layer-3
+// (voltagent-*) are working; this test pins layer-2 specifically.
+func TestLayer2_FoldToggle(t *testing.T) {
+	root := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "cc-plugin",
+				OwnerRepo:  "",
+				FetchOK:    true,
+				Children: []*plugin.Category{
+					{
+						PluginName: "awesome-claude-code-subagents",
+						OwnerRepo:  "voltagent/awesome-claude-code-subagents",
+						FetchOK:    true,
+						Children: []*plugin.Category{
+							{PluginName: "voltagent-lang", FetchOK: true,
+								Subagents: []model.Subagent{
+									{Name: "python-pro", Path: "/tmp/x/py.md"},
+								}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	m := NewModel(root, nil)
+	// Move cursor to layer 2 (row 1: awesome-claude-code-subagents)
+	m2 := mustModel(t, sendKey(m, tea.KeyDown))
+	require.Equal(t, 1, m2.cursor)
+
+	// Press Right on layer 2 - should cascade unfold
+	m3 := mustModel(t, sendKey(m2, tea.KeyRight))
+	view := m3.View()
+	assert.Contains(t, view, "python-pro",
+		"Right on layer-2 (remote marketplace) should cascade unfold its sub-plugins' subagents")
+
+	// Press Right again - should fold back
+	m4 := mustModel(t, sendKey(m3, tea.KeyRight))
+	view2 := m4.View()
+	assert.NotContains(t, view2, "python-pro",
+		"Right again on layer-2 should fold back (toggle works)")
+}
