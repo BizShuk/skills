@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/bizshuk/gosdk/config"
 	"github.com/bizshuk/skills/cmd"
 )
 
 func main() {
+	config.Default(config.WithAppName("skills"))
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
