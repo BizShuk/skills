@@ -12,6 +12,7 @@ The `skills add` CLI discovers plugins, shows a TUI for selecting skills, and in
 So `Subagent.Path` is the absolute path to the `.md` file itself (not a directory), and `Subagent.Name` is the filename without the `.md` extension.
 
 Example plugin structure:
+
 ```
 plugin/
 ├── agents/                    ← scanned for subagents
@@ -29,6 +30,7 @@ plugin/
 ### 1. `svc/plugin/types.go` — Add Subagent type
 
 - Add `Subagent` struct:
+
   ```go
   type Subagent struct {
       Name        string // filename without .md extension
@@ -36,11 +38,13 @@ plugin/
       Description string
   }
   ```
+
 - Add `Subagents []Subagent` field to `LocalPlugin`.
 
 ### 2. `svc/plugin/manifest.go` — Add subagent scanning
 
 - In `scanSkills` (line ~267), after the conventional skills loop, add a subagent scanning block. Subagents are `.md` files (not directories) found under `agents/`, `.claude/agents/`, `.agents/agents/`:
+
   ```go
   agentDirs := []string{
       filepath.Join(lp.Base, "agents"),
@@ -48,29 +52,33 @@ plugin/
       filepath.Join(lp.Base, ".agents", "agents"),
   }
   ```
+
   For each dir, `os.ReadDir`, then for each entry:
-  - Skip directories (subagents are flat files)
-  - Skip files without `.md` extension
-  - `name := strings.TrimSuffix(e.Name(), ".md")`
-  - `path := filepath.Join(agentDir, e.Name())`
-  - `desc := readDescription(path)` — reuse the existing YAML-frontmatter + first-body-line extractor
-  - Deduplicate by `name` (same name in multiple agent dirs → first one wins) using a `seenAgent map[string]bool`
-  - Append `Subagent{Name: name, Path: path, Description: desc}` to `lp.Subagents`
+    - Skip directories (subagents are flat files)
+    - Skip files without `.md` extension
+    - `name := strings.TrimSuffix(e.Name(), ".md")`
+    - `path := filepath.Join(agentDir, e.Name())`
+    - `desc := readDescription(path)` — reuse the existing YAML-frontmatter + first-body-line extractor
+    - Deduplicate by `name` (same name in multiple agent dirs → first one wins) using a `seenAgent map[string]bool`
+    - Append `Subagent{Name: name, Path: path, Description: desc}` to `lp.Subagents`
 
 ### 3. `svc/plugin/discover.go` — Propagate Subagents through Category
 
 - Add `Subagents []Subagent` field to `Category` struct.
 - In `Walk()` (the inner `g.Go` closure, line ~141), when absorbing a local plugin's skills into a parent placeholder, also append the local plugin's `Subagents`:
+
   ```go
   n.parent.Skills = append(n.parent.Skills, lp.Skills...)
   n.parent.Subagents = append(n.parent.Subagents, lp.Subagents...)
   ```
+
 - When creating a fresh `Category` for a local plugin, copy both `Skills` and `Subagents`.
 - In `Catalog.AllSkills()` — optionally add `AllSubagents()` if needed, but not strictly required since the TUI walks the tree directly.
 
 ### 4. `svc/tui/tui.go` — TUI row, icons, View, Selection
 
 **Row extension.** Extend the `row` struct:
+
 ```go
 type row struct {
     node      *plugin.Category
@@ -82,6 +90,7 @@ type row struct {
 ```
 
 **New glyphs.** Add subagent checkbox glyphs:
+
 ```go
 const (
     glyphUnchecked        = "○"
@@ -93,17 +102,21 @@ const (
 ```
 
 **Subagent style.** Add a distinct style for subagent names (e.g., magenta/purple):
+
 ```go
 subagentNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("171"))
 ```
 
 **Model extension.** Add a separate checked map for subagents:
+
 ```go
 checkedSubagent map[string]bool  // keyed by Subagent.Path
 ```
+
 Initialized as empty map in `NewModel`.
 
 **rebuildVisible.** In the skill-rendering loop (line ~259-266), immediately after appending skill rows for an expanded category, also append subagent rows when unfolded:
+
 ```go
 if !m.folded[c] {
     // ... existing skill loop ...
@@ -121,6 +134,7 @@ if !m.folded[c] {
 **Header check state.** `headerCheckState` (line ~310) must also walk subagents: increment `total`/`checked` for each subagent, looking up `m.checkedSubagent[sa.Path]`.
 
 **View rendering (line ~770).** After the existing skill-row rendering block, add a subagent rendering block:
+
 ```go
 if r.subagent != nil {
     box := glyphSAUnchecked
@@ -138,11 +152,13 @@ if r.subagent != nil {
 ```
 
 **Summary line.** Extend `countSummary()` to also count subagents, and render in the summary line:
+
 ```
 Plugins: 3 (1 remote), Skills: 10 (2 remote), Subagents: 4
 ```
 
 **Selection.** Add `SubagentPaths` to the returned `Selection`:
+
 ```go
 func (m Model) Selection() agent.Selection {
     // ... existing SkillPaths ...
@@ -165,6 +181,7 @@ func (m Model) Selection() agent.Selection {
 
 - Add `SubagentPaths []string` to `Selection`.
 - In `Apply()`, after the skill-copy loop, add a subagent-copy loop. Subagent paths point to `.md` files — `copyTree` already handles single files natively (it calls `copyFile` when `os.Stat` reports a non-directory). The destination is the agent's `AgentsDir`:
+
   ```go
   agentsRoot := a.ProjectAgentsDir
   if sel.Global {
@@ -188,6 +205,7 @@ func (m Model) Selection() agent.Selection {
 ### 6. `cmd/root.go` — Wire --yes mode for subagents
 
 In the `--yes` branch (~line 72-79), also collect all subagent paths from the catalog:
+
 ```go
 if yes {
     for _, s := range cat.AllSkills() {
@@ -200,6 +218,7 @@ if yes {
     // ... agents ...
 }
 ```
+
 Add a `WalkSubagents` method on `Catalog` (or inline the walk in `root.go`).
 
 ### 7. `svc/tui/tui_test.go` — Add subagent tests

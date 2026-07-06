@@ -5,6 +5,7 @@ discover subagents (alongside skills) and route them to each agent's
 `projectAgentsDir` / `userAgentsDir` instead of the skills dir.
 
 The plan covers:
+
 1. `svc/plugin/manifest.go` — extending `scanSkills` to also scan for
    subagents.
 2. `svc/agent/agents.go` / `svc/agent/agent.go` — the existing
@@ -425,13 +426,13 @@ func Apply(sel Selection) error {
   accidentally trigger installs. The new inner loop will simply not
   iterate.
 - **Tests to update / add** in `svc/agent/install_test.go`:
-  - Mirror `TestApply_ProjectModeCopiesIntoCwdRelativeDir` to assert
+    - Mirror `TestApply_ProjectModeCopiesIntoCwdRelativeDir` to assert
     that a subagent lands at
     `<cwd>/.claude/agents/<basename>/AGENT.md` for `claude-code`.
-  - Mirror `TestApply_GlobalModeCopiesIntoUserDir` with a
+    - Mirror `TestApply_GlobalModeCopiesIntoUserDir` with a
     subagent going to `~/.claude/agents/<basename>/AGENT.md`.
-  - Mirror `TestApply_BasenameNamesTheSkill` for subagents.
-  - Add a test that combines `SkillPaths` and `SubagentPaths` in
+    - Mirror `TestApply_BasenameNamesTheSkill` for subagents.
+    - Add a test that combines `SkillPaths` and `SubagentPaths` in
     one `Selection` and verifies both land in the right roots.
 
 ---
