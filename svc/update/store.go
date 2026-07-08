@@ -16,6 +16,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/bizshuk/gosdk/config"
 )
 
 // Scope is either "project" or "global" — where skills were installed.
@@ -52,13 +54,10 @@ type InstallsFile struct {
 }
 
 // storePath returns the absolute path to the installs metadata file.
-// On macOS this is ~/.config/skills/data/installs.json.
+// Under gosdk convention this resolves to ~/.config/skills/data/installs.json.
 func storePath() (string, error) {
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("update: cannot resolve user config dir: %w", err)
-	}
-	return filepath.Join(cfgDir, "skills", "data", "installs.json"), nil
+	cfgDir := config.GetAppConfigDir()
+	return filepath.Join(cfgDir, "data", "installs.json"), nil
 }
 
 // Load reads and decodes the installs file. If the file does not exist it
