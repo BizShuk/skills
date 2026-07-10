@@ -26,7 +26,7 @@ func mkSkillDir(t *testing.T, base, name string) string {
 // the canonical names so a regression in the table shape is caught.
 func TestAgents_TableShape(t *testing.T) {
 	got := Agents()
-	require.Len(t, got, 6)
+	require.Len(t, got, 8)
 
 	wantTypes := map[AgentType]bool{
 		"claude-code":     false,
@@ -35,6 +35,8 @@ func TestAgents_TableShape(t *testing.T) {
 		"codex":           false,
 		"opencode":        false,
 		"hermes-agent":    false,
+		"grok":            false,
+		"pi":              false,
 	}
 	for _, a := range got {
 		wantTypes[a.Type] = true

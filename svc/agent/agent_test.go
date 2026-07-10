@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadAllReturnsSixProviders(t *testing.T) {
+func TestLoadAllReturnsEightProviders(t *testing.T) {
 	all := LoadAll()
-	assert.Len(t, all, 6)
+	assert.Len(t, all, 8)
 	want := []string{
 		"claude-code", "antigravity", "antigravity-cli",
-		"codex", "opencode", "hermes-agent",
+		"codex", "opencode", "hermes-agent", "grok", "pi",
 	}
 	got := make([]string, 0, len(all))
 	for _, p := range all {
