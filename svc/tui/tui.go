@@ -157,9 +157,10 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 		}
 	}
 	for _, root := range cat.Roots {
-		if root.OwnerRepo != "" {
-			m.folded[root] = true
-		}
+		// Every root starts folded regardless of OwnerRepo; nested
+		// descendants are folded by foldNested below. Right-arrow on a
+		// header remains the way the user expands a subtree (cascade).
+		m.folded[root] = true
 		foldNested(root)
 	}
 	m.rebuildVisible()
