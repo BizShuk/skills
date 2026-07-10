@@ -385,6 +385,103 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 6: Hide nested children when parent root is folded (regression)
+
+**Files:**
+- Modify: `svc/tui/tui.go` (the `walk` closure inside `rebuildVisible`, ~line 258)
+- Modify: `svc/tui/tui_test.go` (3 existing tests renamed/updated, 1 new test added)
+- Modify: `docs/superpowers/specs/2026-07-11-skills-add-fold-plugin-design.md` (lines 33-40, plus a new amendment block at the end of `互動`)
+
+**Interfaces:**
+- Consumes: existing `plugin.Catalog` + `plugin.Category{Children}` shapes; `m.folded` map already initialized in `NewModel`.
+- Produces: when a node is folded AND there's no active search query, `walk` no longer descends into `c.Children` — the folded header truly hides its subtree.
+
+**Context.** Tasks 1-5 made `NewModel` mark every root as folded. Visual smoke testing caught a follow-up bug: a remote root whose `marketplace.json` declares ~10 sub-plugins (e.g. `voltagent/awesome-claude-code-subagents`) still rendered every child header in the initial view, because `walk` descended into `c.Children` unconditionally. `m.folded[c]` only gated the node's own skill/subagent rows; child header rows leaked through, so a "folded" root looked identical to an expanded one.
+
+- [ ] **Step 1: Gate child walk on fold state**
+
+In `svc/tui/tui.go`, inside `rebuildVisible`'s `walk` closure, change:
+
+```go
+childStart := len(out)
+for _, ch := range c.Children {
+    walk(ch, depth+1)
+}
+childCount := len(out) - childStart
+```
+
+to:
+
+```go
+childStart := len(out)
+// Descend only when this node is expanded OR an active search query
+// needs to find matches in folded subtrees. Without this gate, fold
+// state hides only the node's own skill/subagent rows but child header
+// rows still leak through — a "folded" parent would then look identical
+// to an expanded one.
+if q != "" || !m.folded[c] {
+    for _, ch := range c.Children {
+        walk(ch, depth+1)
+    }
+}
+childCount := len(out) - childStart
+```
+
+- [ ] **Step 2: Rename `TestNewModelFoldsNestedSubPluginsByDefault` → `TestNewModelHidesNestedChildrenWhenParentFolded`**
+
+The old assertion ("`inner` is visible so user can drill in") contradicts the new contract. Replace the entire test body with the version that asserts `inner` is NOT visible and `len(m.rows) == 1`.
+
+- [ ] **Step 3: Update `TestRightArrowExpandsAndLeftFolds` flow**
+
+Old flow asserted 2 rows initially (outer header + inner header). After the gate, the initial state has only the outer header. Replace the entire test body so initial state is 1 row, Right on outer yields 3 rows (cascade unfold), Left on outer yields 1 row (cascade fold).
+
+- [ ] **Step 4: Update `TestLayer2_FoldToggle` flow**
+
+Old flow assumed layer-2 is reachable after one Down. After the gate, layer-2 is hidden until layer-1 cascades open. Replace the entire test body so it Right-arrows on cc-plugin first to reach layer-2, then tests selective fold of layer-2 (cc-plugin stays expanded, layer-2 subtree hides).
+
+- [ ] **Step 5: Add `TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault`**
+
+Direct regression test for the user-reported screenshot. Mirrors the user's exact catalog (8 sibling roots + 1 remote root with 10 children). Asserts initial `len(m.rows) == 10`, asserts all 10 nested children + `python-pro` are absent from the view, then Right-arrows the remote root and asserts cascade unfold exposes `voltagent-lang` + `python-pro`.
+
+- [ ] **Step 6: Amend the design spec**
+
+In `docs/superpowers/specs/2026-07-11-skills-add-fold-plugin-design.md`:
+1. Replace the `互動` table rows for `↓ / ↑` and `鍵入搜尋文字` so the docs match the new behavior (folded parent hides children entirely; search still descends).
+2. Append a "修正 (Amendment, 2026-07-11)" block at the end of `互動` summarizing: root cause, the `walk` gate, the four test updates, the spec amendment.
+
+- [ ] **Step 7: Run the full TUI package + race**
+
+Run: `go test -race ./svc/tui/`
+Expected: every test passes, including:
+- `TestNewModelHidesNestedChildrenWhenParentFolded` (renamed)
+- `TestRightArrowExpandsAndLeftFolds` (updated)
+- `TestLayer2_FoldToggle` (updated)
+- `TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault` (new)
+- `TestCascadeUnfold_ParentShowsAllDescendants` / `TestCascadeFold_ParentHidesAllDescendants` / `TestRight_TogglesFoldOnParent` (unchanged — they all start with Right-arrow so they go through the post-fold path)
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add svc/tui/tui.go svc/tui/tui_test.go docs/superpowers/specs/2026-07-11-skills-add-fold-plugin-design.md
+git commit -m "fix(tui): gate child walk on fold state so nested children hide
+
+User reported voltagent/awesome-claude-code-subagents (a remote root
+with ~10 sub-plugin children) showed all child headers in the initial
+TUI view despite being folded. Root cause: rebuildVisible's walk()
+descended into c.Children unconditionally, so child header rows leaked
+through even when m.folded[c] was true. Fold state only gated the
+node's own skill/subagent rows, not its children.
+
+Fix: skip the child walk when the parent is folded AND there's no
+active search query (search still descends to find matches in folded
+subtrees). A folded root now truly hides its entire subtree; the user
+expands it via Right-arrow cascade.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## Acceptance Criteria
 
 - `TestAllRootPluginsAreFoldedByDefault` passes; old `TestRemoteRootPluginsAreFoldedByDefault` is gone.
@@ -393,3 +490,12 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - All pre-existing TUI tests still pass with `-race`.
 - `svc/tui/tui.go::NewModel` reads with no `if root.OwnerRepo != ""` guard.
 - No new dependencies, no new exported symbols, no new public API in `cmd/`.
+
+### Task 6 regression acceptance (2026-07-11)
+
+- `TestNewModelHidesNestedChildrenWhenParentFolded` passes (replaces `TestNewModelFoldsNestedSubPluginsByDefault`); initial view shows 1 row, no `inner` / `helper` visible.
+- `TestRightArrowExpandsAndLeftFolds` updated flow passes: initial 1 → Right 3 → Left 1.
+- `TestLayer2_FoldToggle` updated flow passes: Right-on-cc-plugin cascades open, then Right-on-layer-2 selectively folds layer-2's subtree.
+- `TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault` (new) passes: 10-root fixture, initial `len(m.rows) == 10`, no nested children visible, Right on remote cascades to expose `voltagent-lang` + `python-pro`.
+- `svc/tui/tui.go::walk` only descends into `c.Children` when `q != "" || !m.folded[c]`.
+- Spec amendment present in `docs/superpowers/specs/2026-07-11-skills-add-fold-plugin-design.md`.
