@@ -254,9 +254,19 @@ func (m *Model) rebuildVisible() {
 
 		// Walk children first; remember where their rows start so we can
 		// either splice our own rows in front or drop them entirely.
+		//
+		// Descend only when this node is expanded OR an active search
+		// query needs to find matches in folded subtrees. Without this
+		// gate, fold state hides only the node's own skill/subagent rows
+		// but child header rows still leak through — a "folded" parent
+		// would then look identical to an expanded one. With the gate, a
+		// folded header truly hides its entire subtree (cascade), and
+		// the user expands it via Right-arrow on the parent.
 		childStart := len(out)
-		for _, ch := range c.Children {
-			walk(ch, depth+1)
+		if q != "" || !m.folded[c] {
+			for _, ch := range c.Children {
+				walk(ch, depth+1)
+			}
 		}
 		childCount := len(out) - childStart
 

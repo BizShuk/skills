@@ -30,14 +30,25 @@ for _, root := range cat.Roots {
 
 | 操作 | 行為 |
 | --- | --- |
-| 啟動 `skills add <path>` 後進入 TUI | 看到 catalog 中每個 plugin 的 header，所有 skills 與 subagents 都隱藏 |
-| `↓` / `↑` | 在 headers 之間移動（nested children 的 headers 即使父層 fold 仍會渲染——`rebuildVisible` 不論 fold 與否都會走訪子節點並把子 header 加入 `out`，使用者透過「header 底下是否有 skill / subagent row」判斷 fold 狀態） |
-| `→` 在 header | cascade 展開整個 subtree（該 header 及其子孫的 skills/subagents 全變可見） |
+| 啟動 `skills add <path>` 後進入 TUI | 看到 catalog 中每個 root plugin 的 header，所有 nested children（含其 headers）與底下所有 skills / subagents 都隱藏 |
+| `↓` / `↑` | 只在 root headers 之間移動——nested children 的 header 在父層 fold 時不渲染 |
+| `→` 在 header | cascade 展開整個 subtree（該 header 及其子孫的 headers、skills、subagents 全變可見） |
 | `←` 在 header | cascade 收合整個 subtree |
 | 空白鍵在 header | 不受 fold 狀態影響，仍能「全選 / 取消全選」subtree 內所有 skills 與 subagents |
-| 鍵入搜尋文字 | `rebuildVisible` 命中 header 名稱時仍會列出 header；命中 skill description 或 subagent description 時，header 因為 `skillDirectMatch` / `subagentDirectMatch` 也會顯示，但底下的 skill row 因 fold 仍藏起來；行為與目前一致 |
+| 鍵入搜尋文字 | `rebuildVisible` 命中 header 名稱時仍會列出 header；命中 skill description 或 subagent description 時，header 因為 `skillDirectMatch` / `subagentDirectMatch` 也會顯示，底下的 skill row 因 fold 仍藏起來；行為與 fold-everything 對齊 |
 
-由於 header 本身沒有視覺 fold 指示（既有的 bubble-tea 渲染維持原樣），使用者得透過「看 header 底下是否有 skill/subagent row」判斷 fold 狀態。本 spec 不引入新圖示（YAGNI）。
+## 修正 (Amendment, 2026-07-11)
+
+實作 `NewModel` fold-all 後回歸一輪使用者回報：remote root plugin（例如 `voltagent/awesome-claude-code-subagents`，其 marketplace.json 宣告十多個 sub-plugins）在 TUI 初始畫面仍把所有 child headers 顯示出來，視覺上看不出 fold 與否。檢查 `rebuildVisible` 發現 child walk 不論 fold 狀態都會遞迴走訪子節點——`m.folded[c]` 只 gate 該節點自己的 skill/subagent row 是否渲染，child header 仍照走訪結果加入 `out`。
+
+修正：child walk 在 `q == "" && m.folded[c]` 時跳過（搜尋時仍必須下鑽才能找到命中）。配套調整：
+
+- `TestNewModelFoldsNestedSubPluginsByDefault` → `TestNewModelHidesNestedChildrenWhenParentFolded`：斷言翻成「`inner` 也不可見」。
+- `TestRightArrowExpandsAndLeftFolds` 流程更新：初始 1 row（outer only）→ Right cascade unfold 至 3 rows → Left cascade fold 回 1 row。
+- `TestLayer2_FoldToggle` 流程更新：先 Right on cc-plugin 取得 layer-2 可達性，再 Down + Right on layer-2 測試 selective fold（cc-plugin 仍展開、layer-2 subtree 收合）。
+- 新增 `TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault`：直接復現使用者截圖的 catalog 形狀（10 children 的 remote root），初始只見 10 個 root headers、所有 nested children 與 python-pro 都不見；Right on remote root 後 cascade 展開到底。
+
+由於 header 本身沒有視覺 fold 指示（既有的 bubble-tea 渲染維持原樣），使用者得透過「看 header 底下是否有 child header / skill / subagent row」判斷 fold 狀態。本 spec 不引入新圖示（YAGNI）。
 
 ## 資料流 (Data Flow)
 
