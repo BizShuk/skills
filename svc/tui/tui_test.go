@@ -732,6 +732,51 @@ func TestSkillDescriptionFoldUnfold(t *testing.T) {
 		"folded-back view should return to the truncated description")
 }
 
+// TestAllRootsFolded_BothRequireExpansion covers the contract for the new
+// fold-everything-by-default policy: a fixture with one local and one
+// remote root starts with no skills visible, expanding either one
+// individually surfaces only its own skill, and expanding both surfaces
+// both. This pins the per-root cascade-expand path for the homogeneous
+// root fold state introduced by 2026-07-11-skills-add-fold-plugin.
+func TestAllRootsFolded_BothRequireExpansion(t *testing.T) {
+	cat := &plugin.Catalog{
+		Roots: []*plugin.Category{
+			{
+				PluginName: "local-plugin",
+				FetchOK:    true,
+				Skills:     []model.Skill{{Name: "local-skill", Path: "/p/local"}},
+			},
+			{
+				PluginName: "remote-plugin",
+				OwnerRepo:  "owner/repo",
+				FetchOK:    true,
+				Skills:     []model.Skill{{Name: "remote-skill", Path: "/p/remote"}},
+			},
+		},
+	}
+	m := NewModel(cat, nil)
+	require.Equal(t, 0, m.cursor, "cursor must land on the first header")
+
+	// Both roots start folded: zero skills rendered, only the two headers.
+	view0 := m.View()
+	assert.NotContains(t, view0, "local-skill", "local skill hidden initially")
+	assert.NotContains(t, view0, "remote-skill", "remote skill hidden initially")
+	require.Equal(t, 2, len(m.rows), "only the two root headers should be visible")
+
+	// Right on local root only.
+	mExpandLocal := mustModel(t, sendKey(m, tea.KeyRight))
+	view1 := mExpandLocal.View()
+	assert.Contains(t, view1, "local-skill", "Right on local exposes local skill")
+	assert.NotContains(t, view1, "remote-skill", "Right on local keeps remote skill hidden")
+
+	// Cursor on the remote header; Right on remote only.
+	mDown := mustModel(t, sendKey(m, tea.KeyDown))
+	mExpandRemote := mustModel(t, sendKey(mDown, tea.KeyRight))
+	view2 := mExpandRemote.View()
+	assert.Contains(t, view2, "local-skill", "Right on remote keeps local skill visible (local already expanded)")
+	assert.Contains(t, view2, "remote-skill", "Right on remote exposes remote skill")
+}
+
 
 
 // subagentCatalog is a fixture with one skill and one subagent.
