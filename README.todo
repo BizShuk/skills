@@ -3,6 +3,10 @@
 - [ ] Create model package for types.go
 - [ ] Add auto update
 
+## Remove
+
+- [x] Add `skills remove` command (TUI + --yes + install-file sync) @2026-07-10
+
 ## Archive
 
 - [x] Add subagent @2026-07-08_23:40:03 @Completed

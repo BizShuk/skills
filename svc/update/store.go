@@ -141,3 +141,58 @@ func Remove(f *InstallsFile, e Entry) ([]Entry, bool) {
 	f.Entries = filtered
 	return f.Entries, removed
 }
+
+// DropNames removes the given skill and subagent names from every entry's
+// Skills / Subagents lists. Entries that end up with both lists empty are
+// removed outright, so a future `skills update` run won't re-fetch a source
+// that no longer has anything to install. The returned slice is the entries
+// that were dropped, in their original form (before the drop), so callers
+// can log them.
+//
+// Equality is exact-string. An entry that tracked "writer" is not matched
+// by "writer-2". Sets rather than lists: passing the same name twice is
+// harmless.
+//
+// DropNames mutates f.Entries in place; the caller is expected to Save.
+func DropNames(f *InstallsFile, removedSkills, removedSubagents []string) []Entry {
+	skillSet := make(map[string]struct{}, len(removedSkills))
+	for _, n := range removedSkills {
+		skillSet[n] = struct{}{}
+	}
+	saSet := make(map[string]struct{}, len(removedSubagents))
+	for _, n := range removedSubagents {
+		saSet[n] = struct{}{}
+	}
+
+	var dropped []Entry
+	kept := make([]Entry, 0, len(f.Entries))
+	for _, e := range f.Entries {
+		newSkills := filterOut(e.Skills, skillSet)
+		newSubagents := filterOut(e.Subagents, saSet)
+		if len(newSkills) == 0 && len(newSubagents) == 0 {
+			dropped = append(dropped, e)
+			continue
+		}
+		e.Skills = newSkills
+		e.Subagents = newSubagents
+		kept = append(kept, e)
+	}
+	f.Entries = kept
+	return dropped
+}
+
+// filterOut returns a copy of names with every element in skipSet removed.
+// The input slice is never mutated.
+func filterOut(names []string, skipSet map[string]struct{}) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if _, drop := skipSet[n]; drop {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}

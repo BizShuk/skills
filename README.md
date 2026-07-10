@@ -75,3 +75,37 @@ skills add owner/repo#v2
 ## 設計文件 (Spec)
 
 設計規格請見 `docs/superpowers/specs/2026-07-04-skills-add-golang-design.md`。
+
+## `skills remove`
+
+`skills remove` 是 `add` 的對稱操作：列出所有已安裝的 skill 與 subagent
+（每個 agent 都納入），讓使用者多選後從磁碟刪除，並同步清理
+`installs.json`，避免下次 `skills update` 默默還原。
+
+```bash
+skills remove                 # 列出全部，進入 TUI 多選
+skills remove --yes           # 跳過 TUI 與 y/N 確認，直接刪除全部
+skills remove --agent claude-code    # 只處理指定 agent
+skills remove --project       # 只列專案層（.claude/skills 等相對 cwd 的路徑）
+skills remove --global        # 只列全域層（~/.claude/skills 等絕對路徑）
+```
+
+TUI 為單一階段的扁平清單：每列一個 `(skill|subagent)` 名稱，後接目前
+裝了它的 agent 與 scope（例：`writer  [skill] — claude-code (project),
+antigravity (project)`）。空白鍵切換選取、Enter 確認、Esc 取消。
+
+確認階段會印出將被刪除的內容到 stderr，並從 stdin 讀取 `y/N`（`--yes`
+跳過）。即使部分檔案刪除失敗，命令仍會回傳非零並繼續處理其餘項目；
+`installs.json` 中對應的 skill/subagent 名稱也會被清掉，整個 entry
+若清空則一併刪除。
+
+## Flags
+
+`skills remove` 支援的 flag：
+
+| Flag        | 說明                                                  |
+| ----------- | ----------------------------------------------------- |
+| `--agent`   | 限縮到指定 agent（可重複），預設為全部                |
+| `--global`  | 只顯示全域層安裝（與 `--project` 互斥）                |
+| `--project` | 只顯示專案層安裝（與 `--global` 互斥）                  |
+| `--yes`     | 自動勾選所有符合條件的項目並跳過 y/N 確認              |
