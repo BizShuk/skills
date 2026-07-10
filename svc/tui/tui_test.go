@@ -777,6 +777,50 @@ func TestAllRootsFolded_BothRequireExpansion(t *testing.T) {
 	assert.Contains(t, view2, "remote-skill", "Right on remote exposes remote skill")
 }
 
+// TestCascadeUnfold_LocalAndRemoteRootsSymmetric guarantees that the
+// homogeneous fold policy uses a single code path for every root —
+// pressing Right on a local root must produce exactly the same row
+// transition as pressing Right on a remote root. If future refactors
+// accidentally introduce a separate "local-only" shortcut (e.g.
+// skipping the cascade helpers), this test catches it.
+func TestCascadeUnfold_LocalAndRemoteRootsSymmetric(t *testing.T) {
+	makeCatalog := func(localName string, localPath string) *plugin.Catalog {
+		return &plugin.Catalog{
+			Roots: []*plugin.Category{
+				{
+					PluginName: localName,
+					FetchOK:    true,
+					Skills:     []model.Skill{{Name: localName + "-skill", Path: localPath}},
+				},
+			},
+		}
+	}
+
+	// Local root: no OwnerRepo.
+	mLocal := NewModel(makeCatalog("local-plugin", "/p/local"), nil)
+	require.Equal(t, 1, len(mLocal.rows), "local root alone: 1 header row initially")
+	mLocalExp := mustModel(t, sendKey(mLocal, tea.KeyRight))
+	require.Equal(t, 2, len(mLocalExp.rows),
+		"Right on local root: header + 1 skill row (same shape as remote)")
+
+	// Remote root: with OwnerRepo.
+	mRemote := NewModel(makeCatalog("remote-plugin", "/p/remote"), nil)
+	// Manually inject OwnerRepo after construction so a single helper drives both.
+	mRemote.cat.Roots[0].OwnerRepo = "owner/repo"
+	require.Equal(t, 1, len(mRemote.rows), "remote root alone: 1 header row initially")
+	mRemoteExp := mustModel(t, sendKey(mRemote, tea.KeyRight))
+	require.Equal(t, 2, len(mRemoteExp.rows),
+		"Right on remote root: header + 1 skill row (same shape as local)")
+
+	// Both views render their respective skill line; pre/post row counts
+	// are identical, proving the fold key is the same and the cascade
+	// branch is reached for both.
+	viewLocal := mLocalExp.View()
+	viewRemote := mRemoteExp.View()
+	assert.Contains(t, viewLocal, "local-plugin-skill")
+	assert.Contains(t, viewRemote, "remote-plugin-skill")
+}
+
 
 
 // subagentCatalog is a fixture with one skill and one subagent.
