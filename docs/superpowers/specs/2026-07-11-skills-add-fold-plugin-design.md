@@ -31,8 +31,8 @@ for _, root := range cat.Roots {
 | 操作 | 行為 |
 | --- | --- |
 | 啟動 `skills add <path>` 後進入 TUI | 看到 catalog 中每個 plugin 的 header，所有 skills 與 subagents 都隱藏 |
-| `↓` / `↑` | 在 headers 之間移動（nested children 的 headers 因為 fold 也藏在上一層之下，需先展開才能看到） |
-| `→` 在 header | cascade 展開整個 subtree |
+| `↓` / `↑` | 在 headers 之間移動（nested children 的 headers 即使父層 fold 仍會渲染——`rebuildVisible` 不論 fold 與否都會走訪子節點並把子 header 加入 `out`，使用者透過「header 底下是否有 skill / subagent row」判斷 fold 狀態） |
+| `→` 在 header | cascade 展開整個 subtree（該 header 及其子孫的 skills/subagents 全變可見） |
 | `←` 在 header | cascade 收合整個 subtree |
 | 空白鍵在 header | 不受 fold 狀態影響，仍能「全選 / 取消全選」subtree 內所有 skills 與 subagents |
 | 鍵入搜尋文字 | `rebuildVisible` 命中 header 名稱時仍會列出 header；命中 skill description 或 subagent description 時，header 因為 `skillDirectMatch` / `subagentDirectMatch` 也會顯示，但底下的 skill row 因 fold 仍藏起來；行為與目前一致 |
