@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/bizshuk/gosdk/config"
+
+	"github.com/bizshuk/skills/svc/agent"
 )
 
 // Scope is either "project" or "global" — where skills were installed.
@@ -167,6 +169,68 @@ func DropNames(f *InstallsFile, removedSkills, removedSubagents []string) []Entr
 	var dropped []Entry
 	kept := make([]Entry, 0, len(f.Entries))
 	for _, e := range f.Entries {
+		newSkills := filterOut(e.Skills, skillSet)
+		newSubagents := filterOut(e.Subagents, saSet)
+		if len(newSkills) == 0 && len(newSubagents) == 0 {
+			dropped = append(dropped, e)
+			continue
+		}
+		e.Skills = newSkills
+		e.Subagents = newSubagents
+		kept = append(kept, e)
+	}
+	f.Entries = kept
+	return dropped
+}
+
+// DropNamesByScope is the section-aware counterpart of DropNames used by
+// `skills remove`. It takes a removed-names record broken into four
+// per-scope buckets (project skills, project subagents, global skills,
+// global subagents) and drops each set from entries whose Scope matches:
+// project names never touch global entries, and global names never touch
+// project entries. This means a single `remove` invocation can take out a
+// project-scope install without invalidating the global entry that
+// tracks the same name at the user level.
+//
+// Entries that end up with both lists empty are removed outright. The
+// returned slice is the entries that were dropped, in their original
+// form, so callers can log them.
+//
+// DropNamesByScope mutates f.Entries in place; the caller is expected to
+// Save.
+func DropNamesByScope(f *InstallsFile, names agent.RemovedNames) []Entry {
+	projSkillSet := make(map[string]struct{}, len(names.ProjectSkills))
+	for _, n := range names.ProjectSkills {
+		projSkillSet[n] = struct{}{}
+	}
+	projSASet := make(map[string]struct{}, len(names.ProjectSubagents))
+	for _, n := range names.ProjectSubagents {
+		projSASet[n] = struct{}{}
+	}
+	globSkillSet := make(map[string]struct{}, len(names.GlobalSkills))
+	for _, n := range names.GlobalSkills {
+		globSkillSet[n] = struct{}{}
+	}
+	globSASet := make(map[string]struct{}, len(names.GlobalSubagents))
+	for _, n := range names.GlobalSubagents {
+		globSASet[n] = struct{}{}
+	}
+
+	var dropped []Entry
+	kept := make([]Entry, 0, len(f.Entries))
+	for _, e := range f.Entries {
+		var skillSet, saSet map[string]struct{}
+		switch e.Scope {
+		case ScopeProject:
+			skillSet, saSet = projSkillSet, projSASet
+		case ScopeGlobal:
+			skillSet, saSet = globSkillSet, globSASet
+		default:
+			// Unknown scope — leave the entry alone rather than risk
+			// silently corrupting it.
+			kept = append(kept, e)
+			continue
+		}
 		newSkills := filterOut(e.Skills, skillSet)
 		newSubagents := filterOut(e.Subagents, saSet)
 		if len(newSkills) == 0 && len(newSubagents) == 0 {

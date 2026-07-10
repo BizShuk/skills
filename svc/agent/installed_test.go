@@ -33,8 +33,6 @@ func TestDiscoverInstalled_SkillsAndSubagentsFromSameAgent(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	// Seed .claude/skills/writer and .claude/skills/helper (claude-code's
-	// project skills dir), plus .claude/agents/reviewer.
 	skillRoot := filepath.Join(cwd, ".claude", "skills")
 	require.NoError(t, os.MkdirAll(filepath.Join(skillRoot, "writer"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(skillRoot, "writer", "SKILL.md"), []byte("# writer"), 0o644))
@@ -49,20 +47,17 @@ func TestDiscoverInstalled_SkillsAndSubagentsFromSameAgent(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 3)
 
-	// Sorted by (Kind, Name): "helper" < "writer" < "code-reviewer" is
-	// wrong: skills come before subagents, so helper, writer, reviewer.
 	byKey := map[string]InstalledItem{}
 	for _, it := range got {
-		byKey[string(it.Kind)+"|"+it.Name] = it
+		byKey[string(it.Scope)+"|"+string(it.Kind)+"|"+it.Name] = it
 	}
 
-	helper := byKey["skill|helper"]
+	helper := byKey["project|skill|helper"]
 	require.Len(t, helper.Locations, 1)
 	assert.Equal(t, AgentType("claude-code"), helper.Locations[0].Agent)
-	assert.Equal(t, "project", string(helper.Locations[0].Scope))
 	assert.Equal(t, filepath.Join(skillRoot, "helper"), helper.Locations[0].Path)
 
-	reviewer := byKey["subagent|reviewer"]
+	reviewer := byKey["project|subagent|reviewer"]
 	require.Len(t, reviewer.Locations, 1)
 	assert.Equal(t, filepath.Join(agentsRoot, "reviewer.md"), reviewer.Locations[0].Path)
 }
@@ -82,7 +77,6 @@ func TestDiscoverInstalled_SameSkillAcrossTwoAgents(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	// writer installed into both claude-code (project) and antigravity (project).
 	claudeSkills := filepath.Join(cwd, ".claude", "skills", "writer")
 	require.NoError(t, os.MkdirAll(claudeSkills, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(claudeSkills, "SKILL.md"), []byte("# writer"), 0o644))
@@ -93,13 +87,11 @@ func TestDiscoverInstalled_SameSkillAcrossTwoAgents(t *testing.T) {
 
 	got, err := DiscoverInstalled()
 	require.NoError(t, err)
-	require.Len(t, got, 1, "writer should appear as one row, not multiple")
+	require.Len(t, got, 1, "writer should appear as one row in project scope")
 	assert.Equal(t, "writer", got[0].Name)
 	assert.Equal(t, InstalledSkill, got[0].Kind)
+	assert.Equal(t, ScopeProject, got[0].Scope)
 
-	// Both .claude/skills/writer and .agents/skills/writer are represented.
-	// The shared .agents/skills dir contributes four agents; claude-code
-	// contributes one. Total: 5 location entries.
 	agents := map[AgentType]bool{}
 	for _, loc := range got[0].Locations {
 		agents[loc.Agent] = true
@@ -109,36 +101,60 @@ func TestDiscoverInstalled_SameSkillAcrossTwoAgents(t *testing.T) {
 	assert.GreaterOrEqual(t, len(got[0].Locations), 2)
 }
 
-// TestDiscoverInstalled_ProjectAndGlobalForSameAgent verifies that a skill
-// installed in both project and global dirs of one agent produces a single
-// row whose Locations list has two entries (one per scope). This matters
-// because both copies are removed when the user picks the row.
-func TestDiscoverInstalled_ProjectAndGlobalForSameAgent(t *testing.T) {
+// TestDiscoverInstalled_ProjectAndGlobalBecomeTwoRows is the key sectioning
+// property: the same name installed at both project and global scopes shows
+// as TWO InstalledItem rows, one per section. This is what enables
+// per-scope toggling in the remove TUI.
+func TestDiscoverInstalled_ProjectAndGlobalBecomeTwoRows(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	cwd := t.TempDir()
 	t.Chdir(cwd)
 
-	// .claude/skills/writer (project)
 	proj := filepath.Join(cwd, ".claude", "skills", "writer")
 	require.NoError(t, os.MkdirAll(proj, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(proj, "SKILL.md"), []byte("# writer"), 0o644))
 
-	// ~/.claude/skills/writer (global)
 	glob := filepath.Join(home, ".claude", "skills", "writer")
 	require.NoError(t, os.MkdirAll(glob, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(glob, "SKILL.md"), []byte("# writer"), 0o644))
 
 	got, err := DiscoverInstalled()
 	require.NoError(t, err)
-	require.Len(t, got, 1)
-	require.Len(t, got[0].Locations, 2)
-	scopes := map[string]bool{}
-	for _, loc := range got[0].Locations {
-		scopes[string(loc.Scope)] = true
+	require.Len(t, got, 2, "one row per scope")
+
+	scopes := map[Scope]bool{}
+	for _, it := range got {
+		assert.Equal(t, "writer", it.Name)
+		scopes[it.Scope] = true
 	}
-	assert.True(t, scopes["project"])
-	assert.True(t, scopes["global"])
+	assert.True(t, scopes[ScopeProject])
+	assert.True(t, scopes[ScopeGlobal])
+}
+
+// TestDiscoverInstalled_ProjectSectionFirst verifies the sort order: all
+// project-scope rows precede all global-scope rows so the TUI renders
+// project before global without an extra sort.
+func TestDiscoverInstalled_ProjectSectionFirst(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	// Seed one project row, one global row, different names so they're
+	// distinguishable by their (kind, name) pair alone.
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".claude", "skills", "proj-only"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, ".claude", "skills", "proj-only", "SKILL.md"), []byte("# x"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "skills", "global-only"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "skills", "global-only", "SKILL.md"), []byte("# x"), 0o644))
+
+	got, err := DiscoverInstalled()
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, ScopeProject, got[0].Scope, "first row must be project scope")
+	assert.Equal(t, "proj-only", got[0].Name)
+	assert.Equal(t, ScopeGlobal, got[1].Scope)
+	assert.Equal(t, "global-only", got[1].Name)
 }
 
 // TestDiscoverInstalled_SkipsDirWithoutSkillMd ensures that an unrelated

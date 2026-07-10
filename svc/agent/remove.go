@@ -14,6 +14,17 @@ type RemoveSelection struct {
 	Items []InstalledItem
 }
 
+// RemovedNames breaks the names of successfully-deleted items into per-scope
+// buckets. The CLI uses this to call update.DropNamesByScope, which keeps
+// installs.json's per-scope entries independent: removing a project-scope
+// skill won't touch global entries (and vice versa).
+type RemovedNames struct {
+	ProjectSkills    []string
+	ProjectSubagents []string
+	GlobalSkills     []string
+	GlobalSubagents  []string
+}
+
 // Remove deletes every location of every picked item from disk and reports
 // which names were touched (so the caller can sync installs.json).
 //
@@ -27,7 +38,8 @@ type RemoveSelection struct {
 // error is non-nil and the partial progress is visible to the caller. The
 // caller should still treat the metadata sync as "best effort" — the names
 // ARE gone from some locations even when others failed.
-func Remove(sel RemoveSelection) (removedSkills []string, removedSubagents []string, err error) {
+func Remove(sel RemoveSelection) (RemovedNames, error) {
+	var out RemovedNames
 	var firstErr error
 	recordErr := func(e error) {
 		if firstErr == nil {
@@ -49,15 +61,23 @@ func Remove(sel RemoveSelection) (removedSkills []string, removedSubagents []str
 			// list, since the file was already gone.
 			continue
 		}
-		switch it.Kind {
-		case InstalledSkill:
-			removedSkills = append(removedSkills, it.Name)
-		case InstalledSubagent:
-			removedSubagents = append(removedSubagents, it.Name)
+		switch it.Scope {
+		case ScopeProject:
+			if it.Kind == InstalledSkill {
+				out.ProjectSkills = append(out.ProjectSkills, it.Name)
+			} else {
+				out.ProjectSubagents = append(out.ProjectSubagents, it.Name)
+			}
+		case ScopeGlobal:
+			if it.Kind == InstalledSkill {
+				out.GlobalSkills = append(out.GlobalSkills, it.Name)
+			} else {
+				out.GlobalSubagents = append(out.GlobalSubagents, it.Name)
+			}
 		}
 	}
 
-	return removedSkills, removedSubagents, firstErr
+	return out, firstErr
 }
 
 // removeLocation deletes a single (kind, path) pair. A NotExist error is

@@ -246,12 +246,14 @@ func runRemove(cmd *cobra.Command, agentFilter []string, onlyGlobal, onlyProject
 		}
 	}
 
-	removedSkills, removedSubagents, removeErr := agent.Remove(sel)
-	syncErr := syncInstallsAfterRemove(removedSkills, removedSubagents)
+	removed, removeErr := agent.Remove(sel)
+	syncErr := syncInstallsAfterRemove(removed)
 
 	var n int
-	n += len(removedSkills)
-	n += len(removedSubagents)
+	n += len(removed.ProjectSkills)
+	n += len(removed.ProjectSubagents)
+	n += len(removed.GlobalSkills)
+	n += len(removed.GlobalSubagents)
 	fmt.Fprintf(cmd.OutOrStdout(), "removed %d item(s)\n", n)
 
 	// removeErr wins over syncErr in the return — a failed disk delete is
@@ -266,7 +268,10 @@ func runRemove(cmd *cobra.Command, agentFilter []string, onlyGlobal, onlyProject
 }
 
 // filterItems applies the --agent, --global, --project filters to the
-// discovery result. An empty agentFilter means "every agent".
+// discovery result. An empty agentFilter means "every agent". Each item
+// already carries a single Scope (DiscoverInstalled splits project and
+// global into separate rows), so --global / --project filtering reduces
+// to "keep / drop" per item rather than per location.
 func filterItems(items []agent.InstalledItem, agentFilter []string, onlyGlobal, onlyProject bool) []agent.InstalledItem {
 	if len(agentFilter) == 0 && !onlyGlobal && !onlyProject {
 		return items
@@ -280,41 +285,24 @@ func filterItems(items []agent.InstalledItem, agentFilter []string, onlyGlobal, 
 	out := make([]agent.InstalledItem, 0, len(items))
 itemLoop:
 	for _, it := range items {
-		// Keep the item if ANY of its locations passes every filter — a
-		// skill installed in two agents is still "matched" if either agent
-		// is in the filter set.
-		kept := false
-		for _, loc := range it.Locations {
-			if len(agentSet) > 0 && !agentSet[loc.Agent] {
-				continue
-			}
-			if onlyGlobal && loc.Scope != agent.ScopeGlobal {
-				continue
-			}
-			if onlyProject && loc.Scope != agent.ScopeProject {
-				continue
-			}
-			kept = true
-			break
+		if onlyGlobal && it.Scope != agent.ScopeGlobal {
+			continue
 		}
-		if !kept {
-			continue itemLoop
+		if onlyProject && it.Scope != agent.ScopeProject {
+			continue
 		}
 
-		// Trim the Locations list to only those that survived the filter
-		// so the TUI shows what will actually be deleted.
+		// Trim Locations to agents the user asked for; if no agent is left
+		// after the filter, drop the item entirely.
 		filtered := it.Locations[:0]
 		for _, loc := range it.Locations {
 			if len(agentSet) > 0 && !agentSet[loc.Agent] {
 				continue
 			}
-			if onlyGlobal && loc.Scope != agent.ScopeGlobal {
-				continue
-			}
-			if onlyProject && loc.Scope != agent.ScopeProject {
-				continue
-			}
 			filtered = append(filtered, loc)
+		}
+		if len(filtered) == 0 {
+			continue itemLoop
 		}
 		it.Locations = filtered
 		out = append(out, it)
@@ -329,13 +317,13 @@ func confirmDelete(cmd *cobra.Command, items []agent.InstalledItem) bool {
 	var b strings.Builder
 	b.WriteString("Will delete:\n")
 	for _, it := range items {
-		fmt.Fprintf(&b, "  - %s (%s)", it.Name, it.Kind)
-		parts := make([]string, 0, len(it.Locations))
+		fmt.Fprintf(&b, "  - %s (%s, %s)", it.Name, it.Kind, it.Scope)
+		agents := make([]string, 0, len(it.Locations))
 		for _, loc := range it.Locations {
-			parts = append(parts, fmt.Sprintf("%s %s", loc.Agent, loc.Scope))
+			agents = append(agents, string(loc.Agent))
 		}
 		b.WriteString("  [")
-		b.WriteString(strings.Join(parts, ", "))
+		b.WriteString(strings.Join(agents, ", "))
 		b.WriteString("]\n")
 	}
 	b.WriteString(fmt.Sprintf("Delete %d item(s)? [y/N] ", len(items)))
@@ -351,19 +339,24 @@ func confirmDelete(cmd *cobra.Command, items []agent.InstalledItem) bool {
 }
 
 // syncInstallsAfterRemove drops the removed skill and subagent names from
-// the installs.json metadata. Entries whose Skills and Subagents lists are
-// both empty after the drop are removed outright, so a later `skills
-// update` won't try to re-install into empty slots. The dropped entries
-// are logged to stderr so the user can see which sources "lost everything".
-func syncInstallsAfterRemove(removedSkills, removedSubagents []string) error {
-	if len(removedSkills) == 0 && len(removedSubagents) == 0 {
+// the installs.json metadata, broken into per-scope buckets. Project names
+// never touch global entries (and vice versa) so a user can remove just
+// the project-scope copy without invalidating the global tracking. Entries
+// whose Skills and Subagents lists are both empty after the drop are
+// removed outright, so a later `skills update` won't try to re-install
+// into empty slots. Dropped entries are logged to stderr.
+func syncInstallsAfterRemove(removed agent.RemovedNames) error {
+	if len(removed.ProjectSkills) == 0 &&
+		len(removed.ProjectSubagents) == 0 &&
+		len(removed.GlobalSkills) == 0 &&
+		len(removed.GlobalSubagents) == 0 {
 		return nil
 	}
 	f, err := update.Load()
 	if err != nil {
 		return err
 	}
-	dropped := update.DropNames(f, removedSkills, removedSubagents)
+	dropped := update.DropNamesByScope(f, removed)
 	for _, e := range dropped {
 		fmt.Fprintf(os.Stderr, "dropped install entry with no remaining items: source=%s scope=%s\n", e.Source, e.Scope)
 	}

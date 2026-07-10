@@ -18,6 +18,15 @@ const (
 	ScopeGlobal  Scope = "global"
 )
 
+// sectionOrder maps a Scope to its rendering priority in the remove TUI.
+// Project is shown before global so the user's eye lands on the more
+// context-specific installs first (cwd-relative); global is the
+// always-on backup that's the same regardless of project.
+var sectionOrder = map[Scope]int{
+	ScopeProject: 0,
+	ScopeGlobal:  1,
+}
+
 // InstalledKind discriminates a leaf in InstalledItem: a skill is a directory
 // containing SKILL.md; a subagent is a flat .md file in the agent's agents dir.
 type InstalledKind string
@@ -27,21 +36,26 @@ const (
 	InstalledSubagent InstalledKind = "subagent"
 )
 
-// InstalledLocation is one disk location where an (item, kind) pair lives.
-// A single item may appear at several locations (different agents, both
-// project + global scopes); they are aggregated onto one InstalledItem.
+// InstalledLocation is one disk location where an InstalledItem lives.
+// Multiple Locations on the same item mean the same skill is mirrored
+// across several agents that share an install root (e.g. four agents
+// all reading from .agents/skills). Each location belongs to exactly one
+// Agent; the parent InstalledItem's Scope is the same for every location
+// on it.
 type InstalledLocation struct {
 	Agent AgentType
-	Scope Scope     // ScopeProject | ScopeGlobal
-	Path  string    // absolute path on disk
+	Path  string // absolute path on disk
 }
 
-// InstalledItem is one row in the remove TUI: the union of every location
-// where (Name, Kind) is currently installed across the supported agents.
-// Toggling the row removes ALL copies.
+// InstalledItem is one row in the remove TUI. Each row is fixed to a
+// single scope (project OR global): a skill installed in both scopes
+// shows as two rows, one per section, so the user can decide each
+// independently. Locations lists every agent that has a copy at this
+// scope; toggling the row removes all of them.
 type InstalledItem struct {
 	Name      string             // "writer" (skill) or "code-reviewer" (subagent)
 	Kind      InstalledKind
+	Scope     Scope              // ScopeProject | ScopeGlobal
 	Locations []InstalledLocation
 }
 
@@ -51,9 +65,12 @@ type InstalledItem struct {
 // exist simply contribute zero items, which is the normal state for a fresh
 // machine or a project that has only ever used a subset of agents.
 //
-// Items are grouped by (Name, Kind) so the same skill in three agents shows
-// up as one row whose Locations list carries the agent-scope pairs. The
-// returned slice is sorted by (Kind, Name) for stable TUI rendering.
+// Items are grouped by (Name, Kind, Scope) so the same skill in three agents
+// at project scope shows up as one row with three Locations, and the same
+// skill at both project + global scopes shows as TWO rows (one per
+// section). The returned slice is sorted by (sectionOrder, Kind, Name) so
+// the TUI can render the Project section before Global without an extra
+// sort pass.
 //
 // cwd anchors the project-relative dirs; if empty, os.Getwd() is used.
 func DiscoverInstalled() ([]InstalledItem, error) {
@@ -62,18 +79,20 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		return nil, fmt.Errorf("discover installed: resolve cwd: %w", err)
 	}
 
-	// Keyed by (kind|name) so we can merge locations across agents/scopes.
+	// Keyed by (kind|name|scope) so the same name at project and global
+	// scopes becomes two distinct rows.
 	type key struct {
-		kind InstalledKind
-		name string
+		kind  InstalledKind
+		name  string
+		scope Scope
 	}
 	bucket := map[key]*InstalledItem{}
 
-	add := func(kind InstalledKind, name string, loc InstalledLocation) {
-		k := key{kind, name}
+	add := func(kind InstalledKind, scope Scope, name string, loc InstalledLocation) {
+		k := key{kind, name, scope}
 		it, ok := bucket[k]
 		if !ok {
-			it = &InstalledItem{Name: name, Kind: kind}
+			it = &InstalledItem{Name: name, Kind: kind, Scope: scope}
 			bucket[k] = it
 		}
 		it.Locations = append(it.Locations, loc)
@@ -87,8 +106,8 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 				root = filepath.Join(cwd, root)
 			}
 			if err := scanSkillsDir(root, func(name, abs string) {
-				add(InstalledSkill, name, InstalledLocation{
-					Agent: a.Type, Scope: ScopeProject, Path: abs,
+				add(InstalledSkill, ScopeProject, name, InstalledLocation{
+					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
 				return nil, fmt.Errorf("discover installed: project skills for %s: %w", a.Type, err)
@@ -100,8 +119,8 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 				root = filepath.Join(cwd, root)
 			}
 			if err := scanAgentsDir(root, func(name, abs string) {
-				add(InstalledSubagent, name, InstalledLocation{
-					Agent: a.Type, Scope: ScopeProject, Path: abs,
+				add(InstalledSubagent, ScopeProject, name, InstalledLocation{
+					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
 				return nil, fmt.Errorf("discover installed: project agents for %s: %w", a.Type, err)
@@ -111,8 +130,8 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		// Global-scope paths (already absolute per Agents()).
 		if a.UserSkillsDir != "" {
 			if err := scanSkillsDir(a.UserSkillsDir, func(name, abs string) {
-				add(InstalledSkill, name, InstalledLocation{
-					Agent: a.Type, Scope: ScopeGlobal, Path: abs,
+				add(InstalledSkill, ScopeGlobal, name, InstalledLocation{
+					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
 				return nil, fmt.Errorf("discover installed: user skills for %s: %w", a.Type, err)
@@ -120,8 +139,8 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		}
 		if a.UserAgentsDir != "" {
 			if err := scanAgentsDir(a.UserAgentsDir, func(name, abs string) {
-				add(InstalledSubagent, name, InstalledLocation{
-					Agent: a.Type, Scope: ScopeGlobal, Path: abs,
+				add(InstalledSubagent, ScopeGlobal, name, InstalledLocation{
+					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
 				return nil, fmt.Errorf("discover installed: user agents for %s: %w", a.Type, err)
@@ -134,14 +153,14 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		// Sort locations so the TUI renders the same string regardless of
 		// the order in which Agents() happens to enumerate.
 		sort.Slice(it.Locations, func(i, j int) bool {
-			if it.Locations[i].Agent != it.Locations[j].Agent {
-				return it.Locations[i].Agent < it.Locations[j].Agent
-			}
-			return it.Locations[i].Scope < it.Locations[j].Scope
+			return it.Locations[i].Agent < it.Locations[j].Agent
 		})
 		out = append(out, *it)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if pi, pj := sectionOrder[out[i].Scope], sectionOrder[out[j].Scope]; pi != pj {
+			return pi < pj
+		}
 		if out[i].Kind != out[j].Kind {
 			return out[i].Kind < out[j].Kind
 		}

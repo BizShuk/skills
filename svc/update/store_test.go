@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/bizshuk/skills/svc/agent"
 )
 
 func TestLoad_EmptyWhenMissing(t *testing.T) {
@@ -251,6 +253,132 @@ func TestDropNames_DoesNotMutateInputSlices(t *testing.T) {
 	DropNames(f, input, nil)
 
 	assert.Equal(t, []string{"writer"}, input, "caller's slice must be untouched")
+}
+
+func TestDropNamesByScope_ProjectDropsOnlyProjectEntries(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{
+		Source: "acme/proj",
+		Scope:  ScopeProject,
+		Skills: []string{"writer", "helper"},
+	})
+	Upsert(f, Entry{
+		Source: "acme/global",
+		Scope:  ScopeGlobal,
+		Skills: []string{"writer", "helper"},
+	})
+
+	dropped := DropNamesByScope(f, agent.RemovedNames{
+		ProjectSkills: []string{"writer"},
+	})
+	assert.Empty(t, dropped, "project entry still has helper, must not be dropped")
+
+	require.Len(t, f.Entries, 2)
+
+	// Project entry: writer removed, helper kept.
+	proj := f.Entries[0]
+	assert.Equal(t, ScopeProject, proj.Scope)
+	assert.Equal(t, []string{"helper"}, proj.Skills)
+
+	// Global entry: untouched.
+	glob := f.Entries[1]
+	assert.Equal(t, ScopeGlobal, glob.Scope)
+	assert.Equal(t, []string{"writer", "helper"}, glob.Skills)
+}
+
+func TestDropNamesByScope_GlobalDropsOnlyGlobalEntries(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{
+		Source: "acme/proj",
+		Scope:  ScopeProject,
+		Skills: []string{"writer"},
+	})
+	Upsert(f, Entry{
+		Source: "acme/global",
+		Scope:  ScopeGlobal,
+		Skills: []string{"writer"},
+	})
+
+	dropped := DropNamesByScope(f, agent.RemovedNames{
+		GlobalSkills: []string{"writer"},
+	})
+	require.Len(t, dropped, 1, "global entry should be the only one dropped")
+	assert.Equal(t, "acme/global", dropped[0].Source)
+	assert.Equal(t, ScopeGlobal, dropped[0].Scope)
+
+	require.Len(t, f.Entries, 1)
+	assert.Equal(t, ScopeProject, f.Entries[0].Scope)
+	assert.Equal(t, []string{"writer"}, f.Entries[0].Skills)
+}
+
+func TestDropNamesByScope_BothScopesInOneCall(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{
+		Source:    "acme/proj",
+		Scope:     ScopeProject,
+		Skills:    []string{"writer"},
+		Subagents: []string{"reviewer"},
+	})
+	Upsert(f, Entry{
+		Source:    "acme/global",
+		Scope:     ScopeGlobal,
+		Skills:    []string{"writer"},
+		Subagents: []string{"reviewer"},
+	})
+
+	dropped := DropNamesByScope(f, agent.RemovedNames{
+		ProjectSkills:    []string{"writer"},
+		GlobalSubagents:  []string{"reviewer"},
+		// Subagents in Project, Skills in Global → each side picks up
+		// exactly the half it owns.
+	})
+	assert.Empty(t, dropped, "neither entry ends up empty after partial drops")
+
+	require.Len(t, f.Entries, 2)
+
+	proj := f.Entries[0]
+	assert.Equal(t, ScopeProject, proj.Scope)
+	assert.Empty(t, proj.Skills, "writer was dropped from project")
+	assert.Equal(t, []string{"reviewer"}, proj.Subagents, "project subagent untouched")
+
+	glob := f.Entries[1]
+	assert.Equal(t, ScopeGlobal, glob.Scope)
+	assert.Equal(t, []string{"writer"}, glob.Skills, "global skill untouched")
+	assert.Empty(t, glob.Subagents, "reviewer was dropped from global")
+}
+
+func TestDropNamesByScope_DropsEntriesLeftEmpty(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{
+		Source: "acme/proj",
+		Scope:  ScopeProject,
+		Skills: []string{"writer"},
+	})
+	Upsert(f, Entry{
+		Source: "acme/global",
+		Scope:  ScopeGlobal,
+		Skills: []string{"helper"},
+	})
+
+	dropped := DropNamesByScope(f, agent.RemovedNames{
+		ProjectSkills: []string{"writer"},
+		GlobalSkills:  []string{"helper"},
+	})
+	require.Len(t, dropped, 2, "both entries should be dropped")
+	require.Empty(t, f.Entries)
+}
+
+func TestDropNamesByScope_EmptyNamesIsNoop(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{
+		Source: "acme/x",
+		Scope:  ScopeProject,
+		Skills: []string{"writer"},
+	})
+
+	dropped := DropNamesByScope(f, agent.RemovedNames{})
+	assert.Empty(t, dropped)
+	assert.Equal(t, []string{"writer"}, f.Entries[0].Skills)
 }
 
 func TestSave_CreatesStoreDir(t *testing.T) {

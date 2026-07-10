@@ -1,14 +1,15 @@
 // Package tui also renders the `skills remove` flow. The remove UI is a
-// single-phase model: one flat list with one row per InstalledItem, search
-// filter, multi-select via Space, and Enter to confirm. There is no agent
-// or level phase — a row's checked state means "delete this skill from
-// every agent it's currently installed in".
+// flat list split into two sections — Project first, then Global — so the
+// user can tell at a glance what's installed at each scope. One row per
+// (Name, Kind, Scope) triple: a skill installed in both project and
+// global shows as two separate rows, one per section, with independent
+// checkboxes.
 //
 // Reuse: viewport math (defaultViewportHeight), the lipgloss style palette
 // (pluginHeaderStyle, checkedStyle, subagentNameStyle), and the textinput
 // search field mirror what tui.go does for `add`. We intentionally don't
 // share the bubbletea Model type with tui.go — `add` is a tree with three
-// phases, `remove` is a flat list with one phase — merging them would
+// phases, `remove` is a sectioned list with one phase — merging them would
 // require either phantom phase values or a feature flag, both worse than
 // a small dedicated model.
 package tui
@@ -24,24 +25,47 @@ import (
 	"github.com/bizshuk/skills/svc/agent"
 )
 
+// removeRowKind discriminates a visible row: a section header vs. an item.
+type removeRowKind int
+
+const (
+	rowSectionHeader removeRowKind = iota
+	rowItem
+)
+
+// removeRow is one line in the rendered remove view. Section headers
+// carry their scope so View() can render the right label; items carry
+// a pointer into removeModel.items.
+type removeRow struct {
+	kind    removeRowKind
+	item    *agent.InstalledItem // non-nil for rowItem
+	section agent.Scope          // valid for both header and item rows
+}
+
+// removeSectionLayout describes the ordering and visibility of the two
+// sections in the rendered list. "Active" sections contribute a header
+// row + their filtered items; sections with zero items (or zero matches)
+// collapse entirely.
+var removeSectionLayout = []agent.Scope{agent.ScopeProject, agent.ScopeGlobal}
+
 // removeModel is the bubbletea model for the remove flow.
 type removeModel struct {
 	items   []agent.InstalledItem
-	visible []int // indices into items after filter
+	visible []removeRow
 	cursor  int
 	offset  int
 
 	search      textinput.Model
 	searchQuery string
 
-	checked map[string]bool // key = kind|name
+	checked map[string]bool // key = scope|kind|name
 	done    bool
 	cancel  bool
 }
 
 // removeRowKey is the dedupe key for an InstalledItem across filter passes.
 func removeRowKey(it agent.InstalledItem) string {
-	return string(it.Kind) + "|" + it.Name
+	return string(it.Scope) + "|" + string(it.Kind) + "|" + it.Name
 }
 
 // NewRemoveModel builds the model from a discovered item list. Every item
@@ -61,32 +85,38 @@ func NewRemoveModel(items []agent.InstalledItem) removeModel {
 }
 
 // rebuildVisible refreshes m.visible against the current search query and
-// resets the cursor if it falls off the end. Items match the query when
-// their Name OR any of their agent names OR their kind substring contains
-// the lower-cased query.
+// the section layout. Items match the query when their Name OR any of
+// their agent names OR their kind substring contains the lower-cased
+// query. Sections with zero matching items are omitted entirely so the
+// user doesn't see an empty "Global" header on a project-only install.
 func (m *removeModel) rebuildVisible() {
 	q := strings.ToLower(strings.TrimSpace(m.searchQuery))
-	out := make([]int, 0, len(m.items))
-	for i, it := range m.items {
-		if q == "" {
-			out = append(out, i)
-			continue
-		}
-		if strings.Contains(strings.ToLower(it.Name), q) {
-			out = append(out, i)
-			continue
-		}
-		if strings.Contains(strings.ToLower(string(it.Kind)), q) {
-			out = append(out, i)
-			continue
-		}
-		for _, loc := range it.Locations {
-			if strings.Contains(strings.ToLower(string(loc.Agent)), q) {
-				out = append(out, i)
-				break
+
+	// Bucket items by section (preserving source order within each).
+	bySection := make(map[agent.Scope][]agent.InstalledItem, len(removeSectionLayout))
+	for _, it := range m.items {
+		bySection[it.Scope] = append(bySection[it.Scope], it)
+	}
+
+	var out []removeRow
+	for _, scope := range removeSectionLayout {
+		items := bySection[scope]
+		var matched []agent.InstalledItem
+		for i := range items {
+			if q == "" || itemMatchesQuery(&items[i], q) {
+				matched = append(matched, items[i])
 			}
 		}
+		if len(matched) == 0 {
+			continue
+		}
+		out = append(out, removeRow{kind: rowSectionHeader, section: scope})
+		for i := range matched {
+			it := matched[i]
+			out = append(out, removeRow{kind: rowItem, item: &it, section: scope})
+		}
 	}
+
 	m.visible = out
 	if m.cursor >= len(m.visible) {
 		m.cursor = len(m.visible) - 1
@@ -94,6 +124,22 @@ func (m *removeModel) rebuildVisible() {
 	if m.cursor < 0 {
 		m.cursor = 0
 	}
+}
+
+// itemMatchesQuery is the per-item search predicate used by rebuildVisible.
+func itemMatchesQuery(it *agent.InstalledItem, q string) bool {
+	if strings.Contains(strings.ToLower(it.Name), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(string(it.Kind)), q) {
+		return true
+	}
+	for _, loc := range it.Locations {
+		if strings.Contains(strings.ToLower(string(loc.Agent)), q) {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureCursorVisible advances m.offset so the cursor lands in the viewport.
@@ -161,8 +207,14 @@ func (m removeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.visible) == 0 {
 			return m, nil
 		}
-		it := m.items[m.visible[m.cursor]]
-		k := removeRowKey(it)
+		r := m.visible[m.cursor]
+		if r.kind != rowItem || r.item == nil {
+			// Space on a section header is a no-op — toggling "all in
+			// section" is a tempting feature but adds non-obvious
+			// semantics (subagent + skill mix). Keep it simple.
+			return m, nil
+		}
+		k := removeRowKey(*r.item)
 		m.checked[k] = !m.checked[k]
 		return m, nil
 	}
@@ -181,9 +233,21 @@ func (m removeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// View renders the remove list. Layout mirrors tui.go's "add" view closely:
-// header line, totals, search field, key hints, body rows, "↓ N more" if
-// off-screen.
+// View renders the sectioned list. Layout:
+//
+//	Select installed skills/subagents to remove
+//	Installed: N skills, M subagents
+//	Search: <input>
+//	↑↓ move, space select, enter confirm, esc cancel
+//
+//	▼ Project (cwd-relative)
+//	  ○  helper  [skill] — claude-code
+//	  ●  reviewer  [subagent] — claude-code
+//
+//	▼ Global (under $HOME)
+//	  ○  helper  [skill] — claude-code
+//
+//	↓ N more (when off-screen)
 func (m removeModel) View() string {
 	var b strings.Builder
 	b.WriteString("Select installed skills/subagents to remove\n")
@@ -218,46 +282,63 @@ func (m removeModel) View() string {
 	}
 
 	for i := start; i < end; i++ {
-		idx := m.visible[i]
-		it := m.items[idx]
+		r := m.visible[i]
 
 		cursor := "  "
 		if i == m.cursor {
 			cursor = "> "
 		}
 
-		k := removeRowKey(it)
+		if r.kind == rowSectionHeader {
+			label := sectionLabel(r.section)
+			b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, "", pluginHeaderStyle.Render("▼ "+label)))
+			continue
+		}
+
+		k := removeRowKey(*r.item)
 		box := glyphUnchecked
 		if m.checked[k] {
 			box = checkedStyle.Render(glyphChecked)
 		}
 
-		kindTag := string(it.Kind)
 		var nameStyle lipgloss.Style
-		switch it.Kind {
+		switch r.item.Kind {
 		case agent.InstalledSubagent:
 			nameStyle = subagentNameStyle
 		default:
 			nameStyle = skillNameStyle
 		}
 
-		// "<agents (scope), ...>" summary, deterministic order (Locations
-		// are already sorted by DiscoverInstalled).
-		parts := make([]string, 0, len(it.Locations))
-		for _, loc := range it.Locations {
-			parts = append(parts, fmt.Sprintf("%s (%s)", loc.Agent, loc.Scope))
+		// Comma-separated agent list (deterministic — locations are
+		// pre-sorted by DiscoverInstalled).
+		agents := make([]string, 0, len(r.item.Locations))
+		for _, loc := range r.item.Locations {
+			agents = append(agents, string(loc.Agent))
 		}
-		locs := strings.Join(parts, ", ")
-
-		b.WriteString(fmt.Sprintf("%s%s%s %s  [%s] — %s\n",
-			cursor, "", box, nameStyle.Render(it.Name), kindTag, locs))
+		b.WriteString(fmt.Sprintf("%s  %s %s  [%s] — %s\n",
+			cursor, box, nameStyle.Render(r.item.Name), r.item.Kind, strings.Join(agents, ", ")))
 	}
 
 	remaining := len(m.visible) - end
 	if remaining > 0 {
-		b.WriteString(fmt.Sprintf("↓ %d more\n", remaining))
+		b.WriteString(fmt.Sprintf("\n↓ %d more\n", remaining))
 	}
 	return b.String()
+}
+
+// sectionLabel maps a Scope to its header label. Kept here (rather than
+// next to the agent.Scope definition) so the wording stays close to the
+// place that renders it — and so an i18n pass later only touches this
+// package.
+func sectionLabel(s agent.Scope) string {
+	switch s {
+	case agent.ScopeProject:
+		return "Project (cwd-relative)"
+	case agent.ScopeGlobal:
+		return "Global (under $HOME)"
+	default:
+		return string(s)
+	}
 }
 
 // Selection returns the InstalledItems the user kept checked. The order
