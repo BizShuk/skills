@@ -1,0 +1,9 @@
+{
+  "type": "pi",
+  "displayName": "Pi",
+  "projectSkillsDir": ".pi/skills",
+  "userSkillsDir": "~/.pi/skills",
+  "projectAgentsDir": ".pi/agents",
+  "userAgentsDir": "~/.pi/agents",
+  "detectDir": "~/.pi"
+}

@@ -1,0 +1,9 @@
+{
+  "type": "grok",
+  "displayName": "Grok",
+  "projectSkillsDir": ".grok/skills",
+  "userSkillsDir": "~/.grok/skills",
+  "projectAgentsDir": ".grok/agents",
+  "userAgentsDir": "~/.grok/agents",
+  "detectDir": "~/.grok"
+}
