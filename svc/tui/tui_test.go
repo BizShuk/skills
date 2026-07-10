@@ -119,8 +119,11 @@ func TestViewIncludesUnableToFetch(t *testing.T) {
 // row CHECKS it (default-unchecked → opt-in). Header is not affected.
 func TestDownMovesCursor(t *testing.T) {
 	m := NewModel(twoSkillCatalog(), nil)
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the skill rows are reachable.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
 
-	m2 := mustModel(t, sendKey(m, tea.KeyDown))
+	m2 := mustModel(t, sendKey(expanded, tea.KeyDown))
 	m3 := mustModel(t, sendKey(m2, tea.KeyDown))
 	m4 := mustModel(t, sendKey(m3, tea.KeyUp))
 	require.Equal(t, 1, m4.cursor, "Down twice then Up once should land on row 1 (writer)")
@@ -290,9 +293,13 @@ func TestSearchFiltersRows(t *testing.T) {
 	}
 	m := NewModel(cat, nil)
 	filtered := mustModel(t, typeRune(m, 'z')) // type "z" — matches only zulu skill
-	require.GreaterOrEqual(t, len(filtered.rows), 2, "filtered view retains alpha header + zulu skill")
+	// 2026-07-11-skills-add-fold-plugin: search hits a folded root's skill
+	// but the matched row stays hidden. Expand the matching header.
+	expanded := mustModel(t, sendKey(filtered, tea.KeyRight))
+	require.GreaterOrEqual(t, len(expanded.rows), 2, "filtered view retains alpha header + zulu skill")
 	// Cursor pinned at 0 after the row set shrinks (rebuildVisible clamps).
-	assert.Equal(t, 0, filtered.cursor)
+	assert.Equal(t, 0, expanded.cursor)
+	filtered = expanded
 
 	view := filtered.View()
 	assert.Contains(t, view, "○ zulu", "zulu skill is visible")
@@ -324,12 +331,15 @@ func TestSearchClearsOnEsc(t *testing.T) {
 		},
 	}
 	m := NewModel(cat, nil)
-	fullView := m.View()
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the skill rows are visible.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	fullView := expanded.View()
 	assert.Contains(t, fullView, "alpha")
 	assert.Contains(t, fullView, "beta")
 
 	// Type "alpha" — only that skill matches.
-	updated := mustModel(t, typeRune(m, 'a'))
+	updated := mustModel(t, typeRune(expanded, 'a'))
 	for _, r := range "lpha" {
 		updated = mustModel(t, typeRune(updated, r))
 	}
@@ -370,6 +380,10 @@ func TestViewportClipsToHeight(t *testing.T) {
 		},
 	}
 	m := NewModel(cat, nil)
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the 5 skill rows join the header row.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	m = expanded
 	require.Equal(t, 6, len(m.rows), "header + 5 skills")
 
 	m.viewportHeight = 3
@@ -405,7 +419,10 @@ func TestDescriptionRendered(t *testing.T) {
 		},
 	}
 	m := NewModel(cat, nil)
-	view := m.View()
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the skill rows render.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	view := expanded.View()
 
 	assert.Contains(t, view, "shorty — Use when fooing the bar",
 		"description rendered after em-dash following the skill name")
@@ -439,6 +456,10 @@ func TestCursorStaysVisible(t *testing.T) {
 		},
 	}
 	m := NewModel(cat, nil)
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the 11 skill rows join the header row.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	m = expanded
 	m.viewportHeight = 3
 	require.Equal(t, 12, len(m.rows)) // header + 11 skills
 
@@ -686,12 +707,15 @@ func TestSkillDescriptionFoldUnfold(t *testing.T) {
 		},
 	}
 	m := NewModel(cat, nil)
-	view1 := m.View()
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header first so the skill row becomes reachable.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	view1 := expanded.View()
 	assert.Contains(t, view1, "long-skill — This is an extremely long description that definitely exceed...",
-		"folded view should truncate the description to 60 characters with ellipsis")
+		"folded view (skill-level) should truncate the description to 60 characters with ellipsis")
 
 	// Move cursor to the skill (row 1, since row 0 is the category header)
-	mDown := mustModel(t, sendKey(m, tea.KeyDown))
+	mDown := mustModel(t, sendKey(expanded, tea.KeyDown))
 	require.Equal(t, 1, mDown.cursor)
 
 	// Press Right to unfold
@@ -728,7 +752,10 @@ func subagentCatalog() *plugin.Catalog {
 // (◇) icon instead of the circle (○) used for skills.
 func TestSubagentDistinctIcon(t *testing.T) {
 	m := NewModel(subagentCatalog(), nil)
-	view := m.View()
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the subagent row is visible.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	view := expanded.View()
 	assert.Contains(t, view, "◇", "subagent should render with hollow diamond icon")
 	assert.Contains(t, view, "reviewer", "subagent name should be visible")
 }
@@ -747,9 +774,12 @@ func TestHeaderToggleAlsoTogglesSubagents(t *testing.T) {
 // subagent row toggles it individually, without affecting skills.
 func TestSubagentSelectionSpaceOnRow(t *testing.T) {
 	m := NewModel(subagentCatalog(), nil)
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the skill/subagent rows are reachable.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
 	// Cursor 0 = header, cursor 1 = skill writer, cursor 2 = subagent reviewer
 	// Move cursor to row 2 (subagent reviewer)
-	m2 := mustModel(t, sendKey(m, tea.KeyDown))  // row 1: skill
+	m2 := mustModel(t, sendKey(expanded, tea.KeyDown))  // row 1: skill
 	m3 := mustModel(t, sendKey(m2, tea.KeyDown)) // row 2: subagent
 	require.Equal(t, 2, m3.cursor)
 	// Space on subagent row
@@ -763,7 +793,10 @@ func TestSubagentSelectionSpaceOnRow(t *testing.T) {
 // after the em-dash separator, same as skills.
 func TestSubagentDescriptionRendered(t *testing.T) {
 	m := NewModel(subagentCatalog(), nil)
-	view := m.View()
+	// 2026-07-11-skills-add-fold-plugin: local roots now start folded;
+	// expand the only header so the subagent row is visible.
+	expanded := mustModel(t, sendKey(m, tea.KeyRight))
+	view := expanded.View()
 	assert.Contains(t, view, "reviewer — Review PRs",
 		"subagent description should render after em-dash")
 }
@@ -801,7 +834,10 @@ func TestSearchMatchesSubagentName(t *testing.T) {
 	for _, r := range "eview" {
 		filtered = mustModel(t, typeRune(filtered, r))
 	}
-	view := filtered.View()
+	// 2026-07-11-skills-add-fold-plugin: search alone keeps the matched
+	// subagent row folded. Expand the matching header so the row renders.
+	expanded := mustModel(t, sendKey(filtered, tea.KeyRight))
+	view := expanded.View()
 	assert.Contains(t, view, "code-reviewer", "subagent matching search should be visible")
 	assert.NotContains(t, view, "apple", "non-matching skill should be hidden")
 }
