@@ -60,9 +60,9 @@ func twoSkillCatalog() *plugin.Catalog {
 }
 
 // oneNestedCatalog: one root "outer" with one child "inner" which has
-// one skill "helper". Used by fold tests — expanded View should show
-// outer header + inner header + helper (3 rows); folded should collapse
-// to just the outer header (1 row).
+// one skill "helper". Used by fold tests — one-level expand of outer
+// shows outer + inner headers (2 rows, helper still hidden); expand
+// inner too for 3 rows; fold outer collapses to just the outer header.
 func oneNestedCatalog() *plugin.Catalog {
 	return &plugin.Catalog{
 		Roots: []*plugin.Category{
@@ -178,24 +178,31 @@ func TestSpaceOnCategoryHeaderChecksAllDescendants(t *testing.T) {
 	assert.Empty(t, m2.Selection().SkillPaths, "second header Space should uncheck all descendant skills")
 }
 
-// TestRightArrowExpandsAndLeftFolds walks the user through the fold
-// transitions on a nested sub-plugin tree. With fold-everything-by-default
-// the inner sub-plugin is hidden until the user expands the OUTER header
-// (cascade); Right on outer reveals outer + inner + helper; Left on outer
-// hides the whole subtree again.
+// TestRightArrowExpandsAndLeftFolds walks the user through one-level
+// unfold + cascade fold on a nested sub-plugin tree.
 //
-//	step 0: initial       → 1 row (outer header only; inner hidden)
-//	step 1: Right on outer → 3 rows (outer + inner + helper, cascade unfold)
-//	step 2: Left on outer  → 1 row (cascade fold hides the whole subtree)
+//	step 0: initial        → 1 row (outer only; inner hidden)
+//	step 1: Right on outer → 2 rows (outer + inner header; helper still folded)
+//	step 2: Down + Right   → 3 rows (drill into inner; helper visible)
+//	step 3: Left on outer  → 1 row (cascade fold hides the whole subtree)
 func TestRightArrowExpandsAndLeftFolds(t *testing.T) {
 	cat := oneNestedCatalog()
 	m := NewModel(cat, nil)
 	require.Equal(t, 1, len(m.rows), "only outer header is visible; inner is hidden behind folded outer")
 
 	expanded := mustModel(t, sendKey(m, tea.KeyRight))
-	require.Equal(t, 3, len(expanded.rows), "Right on outer cascades unfold: outer + inner + helper")
+	require.Equal(t, 2, len(expanded.rows), "Right on outer is one-level: outer + inner header, helper stays hidden")
+	assert.NotContains(t, expanded.View(), "helper", "child plugin stays folded until drilled into")
 
-	reFolded := mustModel(t, sendKey(expanded, tea.KeyLeft))
+	// Drill into inner to reveal helper.
+	onInner := mustModel(t, sendKey(expanded, tea.KeyDown))
+	drilled := mustModel(t, sendKey(onInner, tea.KeyRight))
+	require.Equal(t, 3, len(drilled.rows), "Right on inner reveals helper")
+	assert.Contains(t, drilled.View(), "helper")
+
+	// Cursor back to outer, cascade-fold.
+	onOuter := mustModel(t, sendKey(drilled, tea.KeyUp))
+	reFolded := mustModel(t, sendKey(onOuter, tea.KeyLeft))
 	require.Equal(t, 1, len(reFolded.rows), "Left on outer cascades fold: only outer header remains")
 }
 
@@ -233,7 +240,7 @@ func TestSpaceOnCategoryHeaderChecksNestedSubtree(t *testing.T) {
 // TestNewModelHidesNestedChildrenWhenParentFolded locks in the default-view
 // policy: a brand-new Model shows ONLY the root header — its child header
 // rows and any deeper sub-plugins are hidden until the user expands the
-// root with Right-arrow (cascade). This is what makes "folded" visually
+// root with Right-arrow (one level). This is what makes "folded" visually
 // mean "everything below this header is hidden"; without the gate, fold
 // state only hid skill/subagent rows and child headers leaked through,
 // making a folded root look identical to an expanded one.
@@ -241,17 +248,17 @@ func TestSpaceOnCategoryHeaderChecksNestedSubtree(t *testing.T) {
 // Verified two ways:
 //  1. The inner plugin's skill ("helper") must not appear in the rendered View.
 //  2. The inner plugin header itself must NOT appear — the only way to
-//     reach it is Right-arrow on the root to cascade unfold.
+//     reach it is Right-arrow on the root (one-level unfold).
 func TestNewModelHidesNestedChildrenWhenParentFolded(t *testing.T) {
 	cat := oneNestedCatalog()
 	m := NewModel(cat, nil)
 
-	require.Equal(t, 1, len(m.rows), "only the root header is visible; nested children are hidden until cascade unfold")
+	require.Equal(t, 1, len(m.rows), "only the root header is visible; nested children are hidden until one-level unfold")
 
 	view := m.View()
 	assert.Contains(t, view, "outer", "root header must render")
 	assert.NotContains(t, view, "inner", "nested sub-plugin header must stay hidden until the root is expanded")
-	assert.NotContains(t, view, "helper", "nested skill row must NOT render until the root is expanded")
+	assert.NotContains(t, view, "helper", "nested skill row must NOT render until the child is expanded")
 }
 
 // typeRune feeds a single printable character through Update using the
@@ -936,13 +943,13 @@ func TestSubagentCountSummary(t *testing.T) {
 	assert.Contains(t, view, "Subagents: 1", "summary should count subagents")
 }
 
-// TestCascadeUnfold_ParentShowsAllDescendants verifies that pressing Right on
-// a folded parent category header cascades the unfold to all descendants, so
-// the user actually sees the contents (rather than just toggling the parent
-// state while each descendant remains independently folded and hides its
-// own children). This regression-pins the "second-level remote marketplace
-// can't fold/unfold" UX bug.
-func TestCascadeUnfold_ParentShowsAllDescendants(t *testing.T) {
+// TestOneLevelUnfold_ChildStaysFolded verifies that pressing Right on a
+// folded parent only unfolds that parent: direct child headers become
+// visible, but the child's own leaves stay hidden until the user drills
+// into the child. This is the fix for marketplace roots (e.g.
+// voltagent/awesome-claude-code-subagents) dumping every subagent on
+// first expand.
+func TestOneLevelUnfold_ChildStaysFolded(t *testing.T) {
 	cat := &plugin.Catalog{
 		Roots: []*plugin.Category{
 			{
@@ -962,16 +969,26 @@ func TestCascadeUnfold_ParentShowsAllDescendants(t *testing.T) {
 	m := NewModel(cat, nil)
 	view := m.View()
 	assert.NotContains(t, view, "python-pro", "subagent should be hidden initially (parent + child folded)")
+	assert.NotContains(t, view, "voltagent-lang", "child header hidden while root folded")
 
 	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m2 := mustModel(t, out)
 	view2 := m2.View()
-	assert.Contains(t, view2, "python-pro",
-		"after Right on parent, the subagent should be visible (cascade unfold)")
+	assert.Contains(t, view2, "voltagent-lang",
+		"after Right on parent, direct child header is visible")
+	assert.NotContains(t, view2, "python-pro",
+		"child plugin stays folded — subagent not visible until drill-in")
+
+	// Drill into the child header to reveal the subagent.
+	m3 := mustModel(t, sendKey(m2, tea.KeyDown))
+	m4 := mustModel(t, sendKey(m3, tea.KeyRight))
+	assert.Contains(t, m4.View(), "python-pro",
+		"Right on child header reveals its subagents")
 }
 
-// TestCascadeFold_ParentHidesAllDescendants verifies the inverse: pressing
-// Left on an expanded parent cascades the fold to all descendants.
+// TestCascadeFold_ParentHidesAllDescendants verifies that Left on an
+// expanded parent cascade-folds every descendant, even ones the user
+// had previously drilled into.
 func TestCascadeFold_ParentHidesAllDescendants(t *testing.T) {
 	cat := &plugin.Catalog{
 		Roots: []*plugin.Category{
@@ -990,22 +1007,26 @@ func TestCascadeFold_ParentHidesAllDescendants(t *testing.T) {
 	}
 
 	m := NewModel(cat, nil)
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	m2 := mustModel(t, out)
-	view2 := m2.View()
-	assert.Contains(t, view2, "python-pro", "after Right, subagent visible")
+	// Drill: root → child → subagent visible.
+	m = mustModel(t, sendKey(m, tea.KeyRight))
+	m = mustModel(t, sendKey(m, tea.KeyDown))
+	m = mustModel(t, sendKey(m, tea.KeyRight))
+	assert.Contains(t, m.View(), "python-pro", "after drill-in, subagent visible")
 
-	out2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	m3 := mustModel(t, out2)
-	view3 := m3.View()
-	assert.NotContains(t, view3, "python-pro",
+	// Cursor back to root; Left cascade-folds everything.
+	m = mustModel(t, sendKey(m, tea.KeyUp))
+	m = mustModel(t, sendKey(m, tea.KeyLeft))
+	view := m.View()
+	assert.NotContains(t, view, "python-pro",
 		"after Left on parent, subagent should be hidden again (cascade fold)")
+	assert.NotContains(t, view, "voltagent-lang",
+		"after Left on parent, child header is also hidden")
 }
 
 // TestRight_TogglesFoldOnParent verifies that pressing Right on an
 // already-expanded parent header folds it back (toggle behavior). The first
-// Right unfolds, the second Right folds. This regression-pins the bug
-// where Right only worked in the unfold direction.
+// Right unfolds one level, the second Right cascade-folds. This
+// regression-pins the bug where Right only worked in the unfold direction.
 func TestRight_TogglesFoldOnParent(t *testing.T) {
 	cat := &plugin.Catalog{
 		Roots: []*plugin.Category{
@@ -1024,29 +1045,27 @@ func TestRight_TogglesFoldOnParent(t *testing.T) {
 	}
 
 	m := NewModel(cat, nil)
-	// 1st Right: unfold
+	// 1st Right: one-level unfold → child header visible, leaf still folded
 	out1, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m2 := mustModel(t, out1)
-	assert.Contains(t, m2.View(), "python-pro", "after 1st Right, subagent visible")
+	assert.Contains(t, m2.View(), "voltagent-lang", "after 1st Right, child header visible")
+	assert.NotContains(t, m2.View(), "python-pro", "after 1st Right, child leaf stays folded")
 
 	// 2nd Right: fold back
 	out2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m3 := mustModel(t, out2)
-	assert.NotContains(t, m3.View(), "python-pro", "after 2nd Right, subagent should be hidden again")
+	assert.NotContains(t, m3.View(), "voltagent-lang", "after 2nd Right, child header hidden again")
 
 	// 3rd Right: unfold again
 	out3, _ := m3.Update(tea.KeyMsg{Type: tea.KeyRight})
 	m4 := mustModel(t, out3)
-	assert.Contains(t, m4.View(), "python-pro", "after 3rd Right, subagent visible again (toggle works)")
+	assert.Contains(t, m4.View(), "voltagent-lang", "after 3rd Right, child header visible again (toggle works)")
 }
 
-// TestLayer2_FoldToggle verifies the user-reported three-layer scenario:
-// layer-2 (awesome-claude-code-subagents) and its grandchildren become
-// reachable only after Right-arrowing through the cascade. Right on
-// layer-1 (cc-plugin) cascades everything; Right on layer-2 then
-// selectively folds just layer-2's subtree while leaving layer-1
-// expanded. Layer-3 subagent visibility is pinned by the cascade tests
-// above; this test pins layer-2's selective-fold path.
+// TestLayer2_FoldToggle verifies the user-reported three-layer scenario
+// under one-level unfold: layer-N only becomes reachable by drilling in
+// one level at a time. Right on an already-expanded layer-2 folds its
+// direct children while leaving layer-1 expanded.
 func TestLayer2_FoldToggle(t *testing.T) {
 	root := &plugin.Catalog{
 		Roots: []*plugin.Category{
@@ -1075,32 +1094,38 @@ func TestLayer2_FoldToggle(t *testing.T) {
 	require.Equal(t, 1, len(m.rows),
 		"layer-2 header must be hidden initially — only cc-plugin header visible")
 
-	// Right on layer-1 cascades unfold to the entire subtree:
-	// cc-plugin + awesome-claude-code-subagents + voltagent-lang + python-pro.
+	// Right on layer-1: one-level → layer-2 header only.
 	m1 := mustModel(t, sendKey(m, tea.KeyRight))
-	viewCascade := m1.View()
-	assert.Contains(t, viewCascade, "python-pro",
-		"Right on cc-plugin should cascade through to layer-3 subagents")
+	viewL1 := m1.View()
+	assert.Contains(t, viewL1, "awesome-claude-code-subagents",
+		"Right on cc-plugin reveals layer-2 header")
+	assert.NotContains(t, viewL1, "voltagent-lang",
+		"layer-3 stays folded until layer-2 is expanded")
+	assert.NotContains(t, viewL1, "python-pro",
+		"subagent stays hidden until drilled to layer-3")
 
-	// Down moves cursor to layer-2 (awesome-claude-code-subagents).
+	// Down to layer-2, Right → layer-3 header (still no subagent).
 	m2 := mustModel(t, sendKey(m1, tea.KeyDown))
 	require.Equal(t, 1, m2.cursor, "cursor must land on layer-2 header")
-
-	// Right on layer-2: cc-plugin is already expanded, so this selectively
-	// folds layer-2 — its header stays visible (it's a direct child of
-	// cc-plugin), but its subtree (voltagent-lang + python-pro) hides.
 	m3 := mustModel(t, sendKey(m2, tea.KeyRight))
-	viewSelective := m3.View()
-	assert.NotContains(t, viewSelective, "python-pro",
-		"Right on layer-2 should fold its subtree while leaving layer-1 expanded")
-	assert.Contains(t, viewSelective, "awesome-claude-code-subagents",
+	viewL2 := m3.View()
+	assert.Contains(t, viewL2, "voltagent-lang",
+		"Right on layer-2 reveals layer-3 header")
+	assert.NotContains(t, viewL2, "python-pro",
+		"layer-3 stays folded — subagent not yet visible")
+
+	// Right again on layer-2 (now expanded) toggles fold of its subtree.
+	m4 := mustModel(t, sendKey(m3, tea.KeyRight))
+	viewFolded := m4.View()
+	assert.NotContains(t, viewFolded, "voltagent-lang",
+		"Right on expanded layer-2 folds its children")
+	assert.Contains(t, viewFolded, "awesome-claude-code-subagents",
 		"layer-2 header itself remains visible (parent is expanded)")
 
-	// Right again on layer-2 — toggle back to unfolded.
-	m4 := mustModel(t, sendKey(m3, tea.KeyRight))
-	viewReopen := m4.View()
-	assert.Contains(t, viewReopen, "python-pro",
-		"Right again on layer-2 should unfold its subtree again")
+	// Right again on layer-2 — reopen one level.
+	m5 := mustModel(t, sendKey(m4, tea.KeyRight))
+	assert.Contains(t, m5.View(), "voltagent-lang",
+		"Right again on layer-2 unfolds one level again")
 }
 
 // TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault is the regression
@@ -1163,7 +1188,8 @@ func TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault(t *testing.T) {
 	assert.NotContains(t, view, "python-pro",
 		"subagent under nested child must NOT render while the remote-root parent is folded")
 
-	// Right-arrow on the remote root cascades unfold — children + subagent appear.
+	// Right-arrow on the remote root is one-level: child headers appear,
+	// but each child stays folded (no subagents yet).
 	mExp := mustModel(t, sendKey(m, tea.KeyDown)) // cursor moves down toward remote
 	// Keep pressing Down until cursor lands on awesome-claude-code-subagents (index 8).
 	for mExp.cursor < 8 {
@@ -1173,7 +1199,9 @@ func TestRemoteMarketplaceWithManyChildren_AllHiddenByDefault(t *testing.T) {
 	mExp = mustModel(t, sendKey(mExp, tea.KeyRight))
 	viewExp := mExp.View()
 	assert.Contains(t, viewExp, "voltagent-lang",
-		"Right on the remote root should cascade unfold and reveal nested children")
-	assert.Contains(t, viewExp, "python-pro",
-		"Right on the remote root should cascade unfold all the way to nested subagents")
+		"Right on the remote root reveals nested child headers (one level)")
+	assert.Contains(t, viewExp, "voltagent-core-dev",
+		"Right on the remote root reveals all direct child headers")
+	assert.NotContains(t, viewExp, "python-pro",
+		"child plugins stay folded — subagents hidden until the user drills into a child")
 }

@@ -122,10 +122,11 @@ type Model struct {
 // still contribute a header row (to surface the fetch failure) but no
 // skill rows of their own.
 //
-// Fold state: only the top-level (Roots) plugins start expanded. Every
-// nested sub-plugin starts folded so the user is not overwhelmed by a
-// deeply nested marketplace on first glance; they can drill in with the
-// right-arrow key.
+// Fold state: every header starts folded (roots and nested sub-plugins).
+// Right-arrow unfolds only the current header (one level); its children
+// stay folded so a large marketplace (e.g. voltagent sub-plugins) does
+// not dump every leaf at once. Left-arrow cascade-folds the whole
+// subtree under the cursor.
 //
 // Search state: the search input starts focused and empty, so the user
 // can immediately type to filter.
@@ -146,9 +147,9 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 	m.search.Prompt = ""
 	m.search.Placeholder = ""
 	m.search.Focus()
-	// Pre-fold every nested sub-plugin. Roots stay expanded. We do this in
-	// a second pass after checked is populated so that rebuildVisible sees
-	// a stable fold state when it walks the tree.
+	// Pre-fold every node (roots + nested). Right-arrow only unfolds the
+	// current header; children keep their folded entries so the user must
+	// drill in level by level. rebuildVisible walks this map.
 	var foldNested func(parent *plugin.Category)
 	foldNested = func(parent *plugin.Category) {
 		for _, ch := range parent.Children {
@@ -157,9 +158,6 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 		}
 	}
 	for _, root := range cat.Roots {
-		// Every root starts folded regardless of OwnerRepo; nested
-		// descendants are folded by foldNested below. Right-arrow on a
-		// header remains the way the user expands a subtree (cascade).
 		m.folded[root] = true
 		foldNested(root)
 	}
@@ -1029,23 +1027,22 @@ func wrapText(text string, width int) []string {
 	}
 	return lines
 }
-// unfoldSubtree removes the fold entry for c and recursively for all its
-// descendants. The next rebuildVisible() will then show the entire subtree
-// expanded. This implements the "expand parent fully" UX: pressing Right on
-// a category header should make its contents visible, not leave them gated
-// behind each descendant's own (still-folded) state.
+// unfoldSubtree removes the fold entry for c only. Nested children keep
+// their folded state so Right-arrow is a one-level drill-in: the user
+// sees this header's skills/subagents and direct child headers, but not
+// grandchildren until they expand those child headers too.
+// (Name kept as unfoldSubtree for call-site stability; it no longer
+// cascades — cascade was dumping every marketplace leaf on first open.)
 func unfoldSubtree(c *plugin.Category, folded *map[*plugin.Category]bool) {
 	if c == nil || folded == nil {
 		return
 	}
 	delete(*folded, c)
-	for _, ch := range c.Children {
-		unfoldSubtree(ch, folded)
-	}
 }
 
-// foldSubtree marks c and all its descendants as folded, then schedules a
-// rebuildVisible() so the collapsed tree is rendered.
+// foldSubtree marks c and all its descendants as folded so collapsing a
+// parent truly hides the whole branch (including any child the user had
+// previously drilled into).
 func foldSubtree(c *plugin.Category, folded *map[*plugin.Category]bool) {
 	if c == nil || folded == nil {
 		return
