@@ -632,9 +632,11 @@ func TestMakeAgentsSkipsNonDefaultDetectedAgent(t *testing.T) {
 	assert.False(t, rows[0].checked, "codex is detected but not a default-checked type, so it must stay unchecked")
 }
 
-// TestRemoteRootPluginsAreFoldedByDefault verifies that remote root plugins
-// start folded by default, while local root plugins start expanded.
-func TestRemoteRootPluginsAreFoldedByDefault(t *testing.T) {
+// TestAllRootPluginsAreFoldedByDefault verifies the contract introduced by
+// 2026-07-11-skills-add-fold-plugin: every root plugin (regardless of
+// OwnerRepo) starts folded so skills are hidden until the user expands the
+// header with Right-arrow. Local and remote roots share the same fold key.
+func TestAllRootPluginsAreFoldedByDefault(t *testing.T) {
 	cat := &plugin.Catalog{
 		Roots: []*plugin.Category{
 			{
@@ -652,8 +654,15 @@ func TestRemoteRootPluginsAreFoldedByDefault(t *testing.T) {
 	}
 	m := NewModel(cat, nil)
 	view := m.View()
-	assert.Contains(t, view, "local-skill", "local root plugin skill must render since it starts expanded")
-	assert.NotContains(t, view, "remote-skill", "remote root plugin skill must NOT render since it starts folded")
+	// Every root starts folded — skills stay hidden until the user expands.
+	assert.NotContains(t, view, "local-skill",
+		"local root plugin skill must NOT render since all roots now start folded")
+	assert.NotContains(t, view, "remote-skill",
+		"remote root plugin skill must NOT render since all roots now start folded")
+	// Headers remain visible so the user can navigate to and expand each.
+	assert.Contains(t, view, "local-plugin", "local root header must remain visible")
+	assert.Contains(t, view, "remote-plugin", "remote root header must remain visible")
+	assert.Contains(t, view, "owner/repo", "remote root header keeps showing OwnerRepo")
 }
 
 // TestSkillDescriptionFoldUnfold verifies that a skill with a long description
