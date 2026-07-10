@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/bizshuk/skills/model"
 )
 
 // Scope mirrors update.Scope exactly so the two can be converted at the
@@ -51,12 +53,15 @@ type InstalledLocation struct {
 // single scope (project OR global): a skill installed in both scopes
 // shows as two rows, one per section, so the user can decide each
 // independently. Locations lists every agent that has a copy at this
-// scope; toggling the row removes all of them.
+// scope; toggling the row removes all of them. Description is read from
+// the skill's SKILL.md (or subagent .md frontmatter) at discovery time
+// and rendered inline next to the name in the TUI.
 type InstalledItem struct {
-	Name      string             // "writer" (skill) or "code-reviewer" (subagent)
-	Kind      InstalledKind
-	Scope     Scope              // ScopeProject | ScopeGlobal
-	Locations []InstalledLocation
+	Name        string             // "writer" (skill) or "code-reviewer" (subagent)
+	Kind        InstalledKind
+	Scope       Scope              // ScopeProject | ScopeGlobal
+	Description string             // short summary for TUI rendering (may be empty)
+	Locations   []InstalledLocation
 }
 
 // DiscoverInstalled enumerates every skill and subagent currently on disk
@@ -88,11 +93,11 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 	}
 	bucket := map[key]*InstalledItem{}
 
-	add := func(kind InstalledKind, scope Scope, name string, loc InstalledLocation) {
+	add := func(kind InstalledKind, scope Scope, name, desc string, loc InstalledLocation) {
 		k := key{kind, name, scope}
 		it, ok := bucket[k]
 		if !ok {
-			it = &InstalledItem{Name: name, Kind: kind, Scope: scope}
+			it = &InstalledItem{Name: name, Kind: kind, Scope: scope, Description: desc}
 			bucket[k] = it
 		}
 		it.Locations = append(it.Locations, loc)
@@ -106,7 +111,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 				root = filepath.Join(cwd, root)
 			}
 			if err := scanSkillsDir(root, func(name, abs string) {
-				add(InstalledSkill, ScopeProject, name, InstalledLocation{
+				add(InstalledSkill, ScopeProject, name, model.ReadDescription(filepath.Join(abs, "SKILL.md")), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
@@ -119,7 +124,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 				root = filepath.Join(cwd, root)
 			}
 			if err := scanAgentsDir(root, func(name, abs string) {
-				add(InstalledSubagent, ScopeProject, name, InstalledLocation{
+				add(InstalledSubagent, ScopeProject, name, model.ReadDescription(abs), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
@@ -130,7 +135,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		// Global-scope paths (already absolute per Agents()).
 		if a.UserSkillsDir != "" {
 			if err := scanSkillsDir(a.UserSkillsDir, func(name, abs string) {
-				add(InstalledSkill, ScopeGlobal, name, InstalledLocation{
+				add(InstalledSkill, ScopeGlobal, name, model.ReadDescription(filepath.Join(abs, "SKILL.md")), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
@@ -139,7 +144,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		}
 		if a.UserAgentsDir != "" {
 			if err := scanAgentsDir(a.UserAgentsDir, func(name, abs string) {
-				add(InstalledSubagent, ScopeGlobal, name, InstalledLocation{
+				add(InstalledSubagent, ScopeGlobal, name, model.ReadDescription(abs), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {

@@ -196,3 +196,37 @@ func TestDiscoverInstalled_SkipsReadmeMd(t *testing.T) {
 	assert.Equal(t, "reviewer", got[0].Name)
 	assert.Equal(t, InstalledSubagent, got[0].Kind)
 }
+
+// TestDiscoverInstalled_PopulatesDescription confirms the description is
+// extracted from SKILL.md (skill case) and from the .md frontmatter
+// (subagent case) at discovery time, so the TUI can render it inline next
+// to the name without re-reading the file.
+func TestDiscoverInstalled_PopulatesDescription(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	// Skill with a body-line description (no frontmatter).
+	skillDir := filepath.Join(cwd, ".claude", "skills", "writer")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# writer\nWrites things fluently.\n"), 0o644))
+
+	// Subagent with a frontmatter description.
+	subagentFile := filepath.Join(cwd, ".claude", "agents", "reviewer.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(subagentFile), 0o755))
+	require.NoError(t, os.WriteFile(subagentFile,
+		[]byte("---\ndescription: Reviews PRs skeptically\n---\n# reviewer\n"), 0o644))
+
+	got, err := DiscoverInstalled()
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	byKey := map[string]InstalledItem{}
+	for _, it := range got {
+		byKey[string(it.Kind)+"|"+it.Name] = it
+	}
+	assert.Equal(t, "Writes things fluently.", byKey["skill|writer"].Description)
+	assert.Equal(t, "Reviews PRs skeptically", byKey["subagent|reviewer"].Description)
+}

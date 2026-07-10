@@ -435,108 +435,16 @@ func scanSubagents(lp *model.LocalPlugin) {
 }
 
 // descMaxChars bounds the description preview the TUI renders per skill.
-// If SKILL.md's first body line exceeds this, truncate it and append
-// "..." so the user still sees a non-clipped summary.
+// Kept as a local re-export so existing references in scanSkills /
+// scanSubagents compile unchanged; the real implementation lives in
+// utils.ReadDescription so both install discovery and the remove
+// discovery share one parsing path.
 const descMaxChars = 60
 
-// readDescription returns the first non-empty, non-heading line of path
-// (treated as a markdown file), trimmed and truncated to descMaxChars
-// runes. Returns "" if the file is unreadable, empty, or all headings.
-// If the file starts with YAML frontmatter, it extracts the "description" field.
-func readDescription(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	content := string(data)
-	// Check if there is YAML frontmatter.
-	if strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r\n") {
-		lines := strings.Split(content, "\n")
-		var fmLines []string
-		inFM := false
-		for i, line := range lines {
-			lineTrim := strings.TrimSpace(line)
-			if i == 0 && lineTrim == "---" {
-				inFM = true
-				continue
-			}
-			if inFM && lineTrim == "---" {
-				inFM = false
-				break
-			}
-			if inFM {
-				fmLines = append(fmLines, line)
-			}
-		}
-		// Search for description: in the frontmatter lines
-		for j, fmLine := range fmLines {
-			fmLineTrim := strings.TrimSpace(fmLine)
-			if strings.HasPrefix(strings.ToLower(fmLineTrim), "description:") {
-				val := strings.TrimSpace(strings.TrimPrefix(fmLineTrim, fmLineTrim[:12]))
-				var descLines []string
-				isFoldedOrLiteral := val == ">" || val == "|" || val == ">-" || val == "|-"
-				if isFoldedOrLiteral || val == "" {
-					for k := j + 1; k < len(fmLines); k++ {
-						nextVal := fmLines[k]
-						if strings.TrimSpace(nextVal) == "" {
-							descLines = append(descLines, "")
-							continue
-						}
-						if strings.HasPrefix(nextVal, " ") || strings.HasPrefix(nextVal, "\t") {
-							descLines = append(descLines, strings.TrimSpace(nextVal))
-						} else {
-							break
-						}
-					}
-				} else {
-					descLines = append(descLines, val)
-				}
-
-				desc := strings.Join(descLines, " ")
-				for strings.Contains(desc, "  ") {
-					desc = strings.ReplaceAll(desc, "  ", " ")
-				}
-				desc = strings.TrimSpace(desc)
-
-				if len(desc) >= 2 {
-					if (desc[0] == '"' && desc[len(desc)-1] == '"') || (desc[0] == '\'' && desc[len(desc)-1] == '\'') {
-						desc = desc[1 : len(desc)-1]
-					}
-				}
-				if desc != "" {
-					return desc
-				}
-			}
-		}
-	}
-
-	lines := strings.Split(content, "\n")
-	inFM := false
-	for i, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if i == 0 && line == "---" {
-			inFM = true
-			continue
-		}
-		if inFM {
-			if line == "---" {
-				inFM = false
-			}
-			continue
-		}
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		if line == "---" || line == "===" {
-			continue
-		}
-		return line
-	}
-	return ""
-}
+// readDescription is a thin wrapper kept for the scanSkills /
+// scanSubagents call sites below — the parser itself moved to
+// model.ReadDescription so it can be shared with the remove flow.
+func readDescription(path string) string { return model.ReadDescription(path) }
 
 
 // isContainedIn reports whether target resolves to a path inside (or equal

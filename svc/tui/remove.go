@@ -309,14 +309,21 @@ func (m removeModel) View() string {
 			nameStyle = skillNameStyle
 		}
 
-		// Comma-separated agent list (deterministic — locations are
-		// pre-sorted by DiscoverInstalled).
+		// Row format: cursor + box + name + dim description + (agents).
+		// The kind tag and em-dash are dropped per UX simplification —
+		// description gives the row context, agents in parens tell the
+		// user exactly which installs the toggle will reach.
+		var desc string
+		if r.item.Description != "" {
+			desc = "  " + skillDescStyle.Render(truncateRune(r.item.Description, 60))
+		}
+
 		agents := make([]string, 0, len(r.item.Locations))
 		for _, loc := range r.item.Locations {
 			agents = append(agents, string(loc.Agent))
 		}
-		b.WriteString(fmt.Sprintf("%s  %s %s  [%s] — %s\n",
-			cursor, box, nameStyle.Render(r.item.Name), r.item.Kind, strings.Join(agents, ", ")))
+		b.WriteString(fmt.Sprintf("%s  %s %s%s  (%s)\n",
+			cursor, box, nameStyle.Render(r.item.Name), desc, strings.Join(agents, ", ")))
 	}
 
 	remaining := len(m.visible) - end

@@ -17,34 +17,38 @@ import (
 func sampleRemoveItems() []agent.InstalledItem {
 	return []agent.InstalledItem{
 		{
-			Name:  "writer",
-			Kind:  agent.InstalledSkill,
-			Scope: agent.ScopeProject,
+			Name:        "writer",
+			Kind:        agent.InstalledSkill,
+			Scope:       agent.ScopeProject,
+			Description: "Writes things fluently.",
 			Locations: []agent.InstalledLocation{
 				{Agent: "claude-code", Path: "/p/.claude/skills/writer"},
 			},
 		},
 		{
-			Name:  "helper",
-			Kind:  agent.InstalledSkill,
-			Scope: agent.ScopeProject,
+			Name:        "helper",
+			Kind:        agent.InstalledSkill,
+			Scope:       agent.ScopeProject,
+			Description: "A friendly assistant.",
 			Locations: []agent.InstalledLocation{
 				{Agent: "antigravity", Path: "/p/.agents/skills/helper"},
 				{Agent: "antigravity-cli", Path: "/p/.agents/skills/helper"},
 			},
 		},
 		{
-			Name:  "reviewer",
-			Kind:  agent.InstalledSubagent,
-			Scope: agent.ScopeProject,
+			Name:        "reviewer",
+			Kind:        agent.InstalledSubagent,
+			Scope:       agent.ScopeProject,
+			Description: "Reviews PRs skeptically.",
 			Locations: []agent.InstalledLocation{
 				{Agent: "claude-code", Path: "/p/.claude/agents/reviewer.md"},
 			},
 		},
 		{
-			Name:  "global-helper",
-			Kind:  agent.InstalledSkill,
-			Scope: agent.ScopeGlobal,
+			Name:        "global-helper",
+			Kind:        agent.InstalledSkill,
+			Scope:       agent.ScopeGlobal,
+			Description: "Available everywhere.",
 			Locations: []agent.InstalledLocation{
 				{Agent: "claude-code", Path: "/home/.claude/skills/global-helper"},
 			},
@@ -315,8 +319,29 @@ func TestRemoveModel_ViewRendersHeadersAndAgents(t *testing.T) {
 	assert.Contains(t, v, "writer")
 	assert.Contains(t, v, "helper")
 	assert.Contains(t, v, "reviewer")
-	assert.Contains(t, v, "claude-code", "agent name should appear in the location summary")
-	assert.Contains(t, v, "antigravity")
+	assert.Contains(t, v, "(claude-code)", "project writer row lists claude-code only")
+	assert.Contains(t, v, "(antigravity, antigravity-cli)",
+		"project helper row lists its two agents")
+}
+
+// TestRemoveModel_ViewRendersDescription asserts the per-row format from
+// the design: name + dim description + (agents), with no [skill] tag and
+// no em-dash separator. The description sits on the same line as the
+// name so a single screen shows as many rows as possible.
+func TestRemoveModel_ViewRendersDescription(t *testing.T) {
+	m := NewRemoveModel(sampleRemoveItems())
+	v := m.View()
+
+	assert.Contains(t, v, "Writes things fluently.",
+		"description should appear inline after the skill name")
+	assert.Contains(t, v, "Reviews PRs skeptically.",
+		"subagent description should also appear inline")
+	assert.NotContains(t, v, "[skill]",
+		"the [skill]/[subagent] kind tag is dropped from the row")
+	assert.NotContains(t, v, "[subagent]",
+		"the [skill]/[subagent] kind tag is dropped from the row")
+	assert.NotContains(t, v, "— claude-code",
+		"the em-dash separator is dropped")
 }
 
 // TestRemoveModel_ViewEmptyItems shows a friendly empty state when there
