@@ -19,10 +19,12 @@
 ### Task 1: 新增代理器設定 JSON 檔案
 
 `Files:`
+
 - Create: `svc/agent/providers/grok.json`
 - Create: `svc/agent/providers/pi.json`
 
 `Interfaces:`
+
 - Consumes: 無
 - Produces: 供 `svc/agent/agent.go` 之 `go:embed` 載入的 JSON 檔案
 
@@ -30,13 +32,13 @@
 
 ```json
 {
-  "type": "grok",
-  "displayName": "Grok",
-  "projectSkillsDir": ".grok/skills",
-  "userSkillsDir": "~/.grok/skills",
-  "projectAgentsDir": ".grok/agents",
-  "userAgentsDir": "~/.grok/agents",
-  "detectDir": "~/.grok"
+    "type": "grok",
+    "displayName": "Grok",
+    "projectSkillsDir": ".grok/skills",
+    "userSkillsDir": "~/.grok/skills",
+    "projectAgentsDir": ".grok/agents",
+    "userAgentsDir": "~/.grok/agents",
+    "detectDir": "~/.grok"
 }
 ```
 
@@ -44,13 +46,13 @@
 
 ```json
 {
-  "type": "pi",
-  "displayName": "Pi",
-  "projectSkillsDir": ".pi/skills",
-  "userSkillsDir": "~/.pi/skills",
-  "projectAgentsDir": ".pi/agents",
-  "userAgentsDir": "~/.pi/agents",
-  "detectDir": "~/.pi"
+    "type": "pi",
+    "displayName": "Pi",
+    "projectSkillsDir": ".pi/skills",
+    "userSkillsDir": "~/.pi/skills",
+    "projectAgentsDir": ".pi/agents",
+    "userAgentsDir": "~/.pi/agents",
+    "detectDir": "~/.pi"
 }
 ```
 
@@ -66,9 +68,11 @@ git commit -m "feat: add grok and pi provider configuration files"
 ### Task 2: 更新代理器單元測試
 
 `Files:`
+
 - Modify: `svc/agent/agent_test.go`
 
 `Interfaces:`
+
 - Consumes: `svc/agent/providers/grok.json`, `svc/agent/providers/pi.json`
 - Produces: 綠燈的測試套件
 
@@ -78,17 +82,17 @@ git commit -m "feat: add grok and pi provider configuration files"
 
 ```go
 func TestLoadAllReturnsEightProviders(t *testing.T) {
-	all := LoadAll()
-	assert.Len(t, all, 8)
-	want := []string{
-		"claude-code", "antigravity", "antigravity-cli",
-		"codex", "opencode", "hermes-agent", "grok", "pi",
-	}
-	got := make([]string, 0, len(all))
-	for _, p := range all {
-		got = append(got, string(p.Type))
-	}
-	assert.ElementsMatch(t, want, got)
+ all := LoadAll()
+ assert.Len(t, all, 8)
+ want := []string{
+  "claude-code", "antigravity", "antigravity-cli",
+  "codex", "opencode", "hermes-agent", "grok", "pi",
+ }
+ got := make([]string, 0, len(all))
+ for _, p := range all {
+  got = append(got, string(p.Type))
+ }
+ assert.ElementsMatch(t, want, got)
 }
 ```
 
@@ -109,10 +113,12 @@ git commit -m "test: update agent test to assert 8 providers including grok and 
 ### Task 3: 補齊專案結構規範檔案
 
 `Files:`
+
 - Create: `CLAUDE.md`
 - Create: `AGENTS.md`
 
 `Interfaces:`
+
 - Consumes: 全工作區 `~/projects/` 規範
 - Produces: `CLAUDE.md` 技術脈絡與其軟連結 `AGENTS.md`
 
@@ -124,6 +130,7 @@ git commit -m "test: update agent test to assert 8 providers including grok and 
 ## 專案結構 (Project Structure)
 
 本專案是以 Go 重寫的 `skills` 輔助工具。主要架構如下：
+
 - `cmd/skills/main.go` - CLI 入口點。
 - `svc/agent/` - 代理器設定與安裝路徑管理。
 - `svc/agent/providers/` - 代理器配置 JSON 檔案。

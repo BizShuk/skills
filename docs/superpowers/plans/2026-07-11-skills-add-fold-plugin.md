@@ -18,19 +18,22 @@
 - No header fold-icon affordance; no new key bindings.
 - Commits follow the repo's `<scope>(<unit>): <verb> <object>` style. Use `feat(tui):` or `test(tui):` for the commits in this plan.
 - All commits must end with:
-  ```
-  Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-  ```
+
+    ```text
+    Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+    ```
 
 ---
 
 ### Task 1: Rewrite the default-fold test (watch it fail)
 
 **Files:**
+
 - Modify: `svc/tui/tui_test.go:635-657` (the `TestRemoteRootPluginsAreFoldedByDefault` block)
 - Test: `svc/tui/tui_test.go` (same file; rename existing test)
 
 **Interfaces:**
+
 - Consumes: existing `plugin.Catalog{Roots: []*plugin.Category{...}}` fixture shape with `PluginName`, `OwnerRepo`, `Skills`, `Path`.
 - Produces: a renamed test `TestAllRootPluginsAreFoldedByDefault` covering the new contract.
 
@@ -44,32 +47,32 @@ In `svc/tui/tui_test.go`, replace the existing `TestRemoteRootPluginsAreFoldedBy
 // OwnerRepo) starts folded so skills are hidden until the user expands the
 // header with Right-arrow. Local and remote roots share the same fold key.
 func TestAllRootPluginsAreFoldedByDefault(t *testing.T) {
-	cat := &plugin.Catalog{
-		Roots: []*plugin.Category{
-			{
-				PluginName: "local-plugin",
-				FetchOK:    true,
-				Skills:     []model.Skill{{Name: "local-skill", Path: "/p/local"}},
-			},
-			{
-				PluginName: "remote-plugin",
-				OwnerRepo:  "owner/repo",
-				FetchOK:    true,
-				Skills:     []model.Skill{{Name: "remote-skill", Path: "/p/remote"}},
-			},
-		},
-	}
-	m := NewModel(cat, nil)
-	view := m.View()
-	// Every root starts folded — skills stay hidden until the user expands.
-	assert.NotContains(t, view, "local-skill",
-		"local root plugin skill must NOT render since all roots now start folded")
-	assert.NotContains(t, view, "remote-skill",
-		"remote root plugin skill must NOT render since all roots now start folded")
-	// Headers remain visible so the user can navigate to and expand each.
-	assert.Contains(t, view, "local-plugin", "local root header must remain visible")
-	assert.Contains(t, view, "remote-plugin", "remote root header must remain visible")
-	assert.Contains(t, view, "owner/repo", "remote root header keeps showing OwnerRepo")
+ cat := &plugin.Catalog{
+  Roots: []*plugin.Category{
+   {
+    PluginName: "local-plugin",
+    FetchOK:    true,
+    Skills:     []model.Skill{{Name: "local-skill", Path: "/p/local"}},
+   },
+   {
+    PluginName: "remote-plugin",
+    OwnerRepo:  "owner/repo",
+    FetchOK:    true,
+    Skills:     []model.Skill{{Name: "remote-skill", Path: "/p/remote"}},
+   },
+  },
+ }
+ m := NewModel(cat, nil)
+ view := m.View()
+ // Every root starts folded — skills stay hidden until the user expands.
+ assert.NotContains(t, view, "local-skill",
+  "local root plugin skill must NOT render since all roots now start folded")
+ assert.NotContains(t, view, "remote-skill",
+  "remote root plugin skill must NOT render since all roots now start folded")
+ // Headers remain visible so the user can navigate to and expand each.
+ assert.Contains(t, view, "local-plugin", "local root header must remain visible")
+ assert.Contains(t, view, "remote-plugin", "remote root header must remain visible")
+ assert.Contains(t, view, "owner/repo", "remote root header keeps showing OwnerRepo")
 }
 ```
 
@@ -96,9 +99,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 2: Make NewModel fold every root
 
 **Files:**
+
 - Modify: `svc/tui/tui.go:152-164` (the `NewModel` fold-init loop)
 
 **Interfaces:**
+
 - Consumes: `m.folded map[*plugin.Category]bool` already initialized in `NewModel` (line 137).
 - Produces: every `cat.Roots[*]` is unconditionally in `m.folded` after `NewModel` returns; nested descendants are still folded by the unchanged `foldNested` closure.
 
@@ -136,6 +141,7 @@ Expected: PASS.
 
 Run: `go test ./svc/tui -v`
 Expected: all TUI tests pass. Pay particular attention to:
+
 - `TestRightArrowExpandsAndLeftFolds` (nested fold/unfold unchanged)
 - `TestNewModelFoldsNestedSubPluginsByDefault` (nested behavior unchanged)
 - `TestCascadeUnfold_ParentShowsAllDescendants` (cascade path unchanged)
@@ -160,9 +166,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 3: Add per-root expansion test covering local + remote
 
 **Files:**
+
 - Modify: append to `svc/tui/tui_test.go` (near `TestRemoteRootPluginsAreFoldedByDefault`'s former location)
 
 **Interfaces:**
+
 - Consumes: `mustModel(t, sendKey(m, tea.KeyType))` helper (line 144).
 - Produces: a new test `TestAllRootsFolded_BothRequireExpansion` covering three scenarios on a single fixture (local + remote root): initial hidden → expand one → expand other → expand both.
 
@@ -178,42 +186,42 @@ Append to `svc/tui/tui_test.go`:
 // both. This pins the per-root cascade-expand path for the homogeneous
 // root fold state introduced by 2026-07-11-skills-add-fold-plugin.
 func TestAllRootsFolded_BothRequireExpansion(t *testing.T) {
-	cat := &plugin.Catalog{
-		Roots: []*plugin.Category{
-			{
-				PluginName: "local-plugin",
-				FetchOK:    true,
-				Skills:     []model.Skill{{Name: "local-skill", Path: "/p/local"}},
-			},
-			{
-				PluginName: "remote-plugin",
-				OwnerRepo:  "owner/repo",
-				FetchOK:    true,
-				Skills:     []model.Skill{{Name: "remote-skill", Path: "/p/remote"}},
-			},
-		},
-	}
-	m := NewModel(cat, nil)
-	require.Equal(t, 0, m.cursor, "cursor must land on the first header")
+ cat := &plugin.Catalog{
+  Roots: []*plugin.Category{
+   {
+    PluginName: "local-plugin",
+    FetchOK:    true,
+    Skills:     []model.Skill{{Name: "local-skill", Path: "/p/local"}},
+   },
+   {
+    PluginName: "remote-plugin",
+    OwnerRepo:  "owner/repo",
+    FetchOK:    true,
+    Skills:     []model.Skill{{Name: "remote-skill", Path: "/p/remote"}},
+   },
+  },
+ }
+ m := NewModel(cat, nil)
+ require.Equal(t, 0, m.cursor, "cursor must land on the first header")
 
-	// Both roots start folded: zero skills rendered, only the two headers.
-	view0 := m.View()
-	assert.NotContains(t, view0, "local-skill", "local skill hidden initially")
-	assert.NotContains(t, view0, "remote-skill", "remote skill hidden initially")
-	require.Equal(t, 2, len(m.rows), "only the two root headers should be visible")
+ // Both roots start folded: zero skills rendered, only the two headers.
+ view0 := m.View()
+ assert.NotContains(t, view0, "local-skill", "local skill hidden initially")
+ assert.NotContains(t, view0, "remote-skill", "remote skill hidden initially")
+ require.Equal(t, 2, len(m.rows), "only the two root headers should be visible")
 
-	// Right on local root only.
-	mExpandLocal := mustModel(t, sendKey(m, tea.KeyRight))
-	view1 := mExpandLocal.View()
-	assert.Contains(t, view1, "local-skill", "Right on local exposes local skill")
-	assert.NotContains(t, view1, "remote-skill", "Right on local keeps remote skill hidden")
+ // Right on local root only.
+ mExpandLocal := mustModel(t, sendKey(m, tea.KeyRight))
+ view1 := mExpandLocal.View()
+ assert.Contains(t, view1, "local-skill", "Right on local exposes local skill")
+ assert.NotContains(t, view1, "remote-skill", "Right on local keeps remote skill hidden")
 
-	// Cursor on the remote header; Right on remote only.
-	mDown := mustModel(t, sendKey(m, tea.KeyDown))
-	mExpandRemote := mustModel(t, sendKey(mDown, tea.KeyRight))
-	view2 := mExpandRemote.View()
-	assert.Contains(t, view2, "local-skill", "Right on remote keeps local skill visible (local already expanded)")
-	assert.Contains(t, view2, "remote-skill", "Right on remote exposes remote skill")
+ // Cursor on the remote header; Right on remote only.
+ mDown := mustModel(t, sendKey(m, tea.KeyDown))
+ mExpandRemote := mustModel(t, sendKey(mDown, tea.KeyRight))
+ view2 := mExpandRemote.View()
+ assert.Contains(t, view2, "local-skill", "Right on remote keeps local skill visible (local already expanded)")
+ assert.Contains(t, view2, "remote-skill", "Right on remote exposes remote skill")
 }
 ```
 
@@ -241,9 +249,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 4: Confirm cascade path symmetry between local and remote roots
 
 **Files:**
+
 - Modify: append to `svc/tui/tui_test.go`
 
 **Interfaces:**
+
 - Consumes: same `sendKey` / `mustModel` helpers; mirrors the existing `TestCascadeUnfold_ParentShowsAllDescendants` (line 813) but with one local and one remote root instead of a nested remote chain.
 - Produces: a new test confirming Right-arrow produces the same `len(rows)` and same skill visibility on a local root as on a remote root — i.e. the local root runs through the same cascade code path, not a separate shortcut.
 
@@ -259,41 +269,41 @@ Append to `svc/tui/tui_test.go`:
 // accidentally introduce a separate "local-only" shortcut (e.g.
 // skipping the cascade helpers), this test catches it.
 func TestCascadeUnfold_LocalAndRemoteRootsSymmetric(t *testing.T) {
-	makeCatalog := func(localName string, localPath string) *plugin.Catalog {
-		return &plugin.Catalog{
-			Roots: []*plugin.Category{
-				{
-					PluginName: localName,
-					FetchOK:    true,
-					Skills:     []model.Skill{{Name: localName + "-skill", Path: localPath}},
-				},
-			},
-		}
-	}
+ makeCatalog := func(localName string, localPath string) *plugin.Catalog {
+  return &plugin.Catalog{
+   Roots: []*plugin.Category{
+    {
+     PluginName: localName,
+     FetchOK:    true,
+     Skills:     []model.Skill{{Name: localName + "-skill", Path: localPath}},
+    },
+   },
+  }
+ }
 
-	// Local root: no OwnerRepo.
-	mLocal := NewModel(makeCatalog("local-plugin", "/p/local"), nil)
-	require.Equal(t, 1, len(mLocal.rows), "local root alone: 1 header row initially")
-	mLocalExp := mustModel(t, sendKey(mLocal, tea.KeyRight))
-	require.Equal(t, 2, len(mLocalExp.rows),
-		"Right on local root: header + 1 skill row (same shape as remote)")
+ // Local root: no OwnerRepo.
+ mLocal := NewModel(makeCatalog("local-plugin", "/p/local"), nil)
+ require.Equal(t, 1, len(mLocal.rows), "local root alone: 1 header row initially")
+ mLocalExp := mustModel(t, sendKey(mLocal, tea.KeyRight))
+ require.Equal(t, 2, len(mLocalExp.rows),
+  "Right on local root: header + 1 skill row (same shape as remote)")
 
-	// Remote root: with OwnerRepo.
-	mRemote := NewModel(makeCatalog("remote-plugin", "/p/remote"), nil)
-	// Manually inject OwnerRepo after construction so a single helper drives both.
-	mRemote.cat.Roots[0].OwnerRepo = "owner/repo"
-	require.Equal(t, 1, len(mRemote.rows), "remote root alone: 1 header row initially")
-	mRemoteExp := mustModel(t, sendKey(mRemote, tea.KeyRight))
-	require.Equal(t, 2, len(mRemoteExp.rows),
-		"Right on remote root: header + 1 skill row (same shape as local)")
+ // Remote root: with OwnerRepo.
+ mRemote := NewModel(makeCatalog("remote-plugin", "/p/remote"), nil)
+ // Manually inject OwnerRepo after construction so a single helper drives both.
+ mRemote.cat.Roots[0].OwnerRepo = "owner/repo"
+ require.Equal(t, 1, len(mRemote.rows), "remote root alone: 1 header row initially")
+ mRemoteExp := mustModel(t, sendKey(mRemote, tea.KeyRight))
+ require.Equal(t, 2, len(mRemoteExp.rows),
+  "Right on remote root: header + 1 skill row (same shape as local)")
 
-	// Both views render their respective skill line; pre/post row counts
-	// are identical, proving the fold key is the same and the cascade
-	// branch is reached for both.
-	viewLocal := mLocalExp.View()
-	viewRemote := mRemoteExp.View()
-	assert.Contains(t, viewLocal, "local-plugin-skill")
-	assert.Contains(t, viewRemote, "remote-plugin-skill")
+ // Both views render their respective skill line; pre/post row counts
+ // are identical, proving the fold key is the same and the cascade
+ // branch is reached for both.
+ viewLocal := mLocalExp.View()
+ viewRemote := mRemoteExp.View()
+ assert.Contains(t, viewLocal, "local-plugin-skill")
+ assert.Contains(t, viewRemote, "remote-plugin-skill")
 }
 ```
 
@@ -337,6 +347,7 @@ Expected: exit 0; `bin/skills` exists.
 This bypasses the interactive keystroke loop and confirms the policy change did not break the headless pipeline. The path must resolve to a directory containing a `manifest.json` (or skill markdown) that `svc/discover` can resolve.
 
 Run:
+
 ```bash
 TMP=$(mktemp -d)
 mkdir -p "$TMP/demo/skills/writer"
@@ -355,6 +366,7 @@ RC=$?
 rm -rf "$TMP"
 exit $RC
 ```
+
 Expected: `skills add` reports writing `writer` to `.claude/skills`. Exit 0.
 
 If `--yes` short-circuits the TUI entirely and exercises only `Selection()`, do not consider it a substitute for manual interaction — confirm only that pipeline wiring is intact.
