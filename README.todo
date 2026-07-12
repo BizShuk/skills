@@ -1,7 +1,7 @@
 # TODO
 
+- [ ] change to api.github.com for private repo
 - [ ] Create model package for types.go
-- [ ] Add auto update
 
 ## Remove
 
@@ -9,4 +9,5 @@
 
 ## Archive
 
+- [x] Add auto update @2026-07-12_23:16:53 @Completed
 - [x] Add subagent @2026-07-08_23:40:03 @Completed
