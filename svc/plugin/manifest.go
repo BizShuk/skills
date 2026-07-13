@@ -465,3 +465,26 @@ func isContainedIn(target, base string) bool {
 	}
 	return !filepath.IsAbs(rel)
 }
+
+// hasAnyManifest reports whether ANY of the three manifest paths is reachable
+// as a file under base. "Reachable" means os.Stat returned no error or any
+// error other than os.IsNotExist (e.g. permission denied). A parse error on
+// an existing-but-malformed file still counts as "exists" — we want the
+// existing silent-ignore path to surface (or not) unchanged, and we do not
+// want a transient permission glitch to flip a repo into fallback mode and
+// emit a synthetic empty plugin.
+func hasAnyManifest(base string) bool {
+	paths := []string{
+		filepath.Join(base, ".claude-plugin", "marketplace.json"),
+		filepath.Join(base, ".claude-plugin", "plugin.json"),
+		filepath.Join(base, "skill.json"),
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		} else if !os.IsNotExist(err) {
+			return true
+		}
+	}
+	return false
+}

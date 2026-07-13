@@ -462,3 +462,42 @@ func TestScan_AgentsFieldRejectsMissingFile(t *testing.T) {
 	require.Len(t, lp.Subagents, 1, "missing file should be skipped; only real.md should appear")
 	assert.Equal(t, "real", lp.Subagents[0].Name)
 }
+
+// TestHasAnyManifest verifies the helper that gates the no-manifest
+// fallback in Scan(): true if any of marketplace.json / plugin.json /
+// skill.json is reachable; false when all are missing.
+func TestHasAnyManifest(t *testing.T) {
+	t.Run("none present", func(t *testing.T) {
+		base := t.TempDir()
+		assert.False(t, hasAnyManifest(base))
+	})
+
+	t.Run("marketplace only", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude-plugin"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(base, ".claude-plugin", "marketplace.json"), []byte("{}"), 0o644))
+		assert.True(t, hasAnyManifest(base))
+	})
+
+	t.Run("plugin only", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude-plugin"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(base, ".claude-plugin", "plugin.json"), []byte("{}"), 0o644))
+		assert.True(t, hasAnyManifest(base))
+	})
+
+	t.Run("skill only", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte("{}"), 0o644))
+		assert.True(t, hasAnyManifest(base))
+	})
+
+	t.Run("malformed json still counts as present", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude-plugin"), 0o755))
+		// Intentionally invalid JSON — should still be treated as "manifest exists"
+		// so the fallback does not silently mask a real parse bug.
+		require.NoError(t, os.WriteFile(filepath.Join(base, ".claude-plugin", "plugin.json"), []byte("not json"), 0o644))
+		assert.True(t, hasAnyManifest(base))
+	})
+}
