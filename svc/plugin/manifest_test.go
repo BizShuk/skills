@@ -566,3 +566,22 @@ func TestIsInsideAgentDir(t *testing.T) {
 		})
 	}
 }
+
+// TestScan_NoManifest_Fallback_SkillsDir verifies the headline fix: a repo
+// with NO plugin.json / marketplace.json / skill.json and only a top-level
+// skills/<name>/SKILL.md layout still surfaces its skills.
+func TestScan_NoManifest_Fallback_SkillsDir(t *testing.T) {
+	base := t.TempDir()
+	skillDir := filepath.Join(base, "skills", "my-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# my-skill\nDoes things."), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1, "no-manifest repo should still get a synthetic plugin")
+	assert.Equal(t, filepath.Base(base), parsed.Locals[0].Name)
+	assert.Equal(t, base, parsed.Locals[0].Base)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "my-skill", parsed.Locals[0].Skills[0].Name)
+}

@@ -33,6 +33,24 @@ func Scan(base string) (model.Parsed, error) {
 		return model.Parsed{}, err
 	}
 	out.Locals = dedupeLocalsByBase(out.Locals)
+
+	// Fallback: when no manifest declared this dir as a plugin, but it
+	// still looks like a skill repo (has a conventional skills/ dir) and
+	// it isn't itself an agents/ subdirectory, treat base as a synthetic
+	// root plugin. This keeps "drop a skill in skills/ and try it" working
+	// without requiring a manifest up front.
+	if !hasAnyManifest(absBase) &&
+		hasAnyConventionalSkillsDir(absBase) &&
+		!isInsideAgentDir(absBase) {
+		name := filepath.Base(absBase)
+		if name == "." || name == string(filepath.Separator) {
+			name = "root"
+		}
+		lp := model.LocalPlugin{Name: name, Base: absBase}
+		scanSkills(absBase, &lp, nil)
+		out.Locals = append(out.Locals, lp)
+	}
+
 	return out, nil
 }
 
