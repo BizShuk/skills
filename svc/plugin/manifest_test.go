@@ -585,3 +585,147 @@ func TestScan_NoManifest_Fallback_SkillsDir(t *testing.T) {
 	require.Len(t, parsed.Locals[0].Skills, 1)
 	assert.Equal(t, "my-skill", parsed.Locals[0].Skills[0].Name)
 }
+
+// E2: <base>/.claude/skills/ is the conventional dir.
+func TestScan_NoManifest_Fallback_DotClaudeSkillsDir(t *testing.T) {
+	base := t.TempDir()
+	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# design\ndesc"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "design", parsed.Locals[0].Skills[0].Name)
+}
+
+// E3: <base>/.agents/skills/ is the conventional dir.
+func TestScan_NoManifest_Fallback_DotAgentsSkillsDir(t *testing.T) {
+	base := t.TempDir()
+	skillDir := filepath.Join(base, ".agents", "skills", "agent-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# agent-skill\ndesc"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "agent-skill", parsed.Locals[0].Skills[0].Name)
+}
+
+// E4: skills/ sitting INSIDE an agents/ subdir must NOT be picked up
+// as a fallback plugin. The conventional agents/ layout is for subagents.
+func TestScan_NoManifest_SkillsInsideAgentDir_Ignored(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "agents")
+	skillDir := filepath.Join(base, "skills", "not-a-plugin")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# not-a-plugin\ndesc"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	assert.Empty(t, parsed.Locals, "nested agents/skills/ must not trigger the fallback")
+}
+
+// E5: empty skills/ dir → still synthesize a plugin, but with no skills.
+// We do not suppress the plugin on empty skills; the user may add one
+// later and we want it discoverable.
+func TestScan_NoManifest_EmptySkillsDir_PluginStillCreated(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "skills"), 0o755))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1, "empty skills/ should still produce a plugin")
+	assert.Empty(t, parsed.Locals[0].Skills)
+}
+
+// E6: no manifest, no conventional skills dir → no plugin.
+func TestScan_NoManifest_NoSkillsDir_NoFallback(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(base, "README.md"),
+		[]byte("# just a readme"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	assert.Empty(t, parsed.Locals)
+}
+
+// E7: an existing plugin.json must short-circuit the fallback. We do not
+// get a synthetic duplicate alongside the manifest-declared plugin.
+func TestScan_PluginJsonExists_NoFallback(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(base, ".claude-plugin", "plugin.json"),
+		[]byte(`{"name":"declared"}`), 0o644))
+
+	// Also create a conventional skills/ dir — must NOT trigger fallback.
+	skillDir := filepath.Join(base, "skills", "extra")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# extra\ndesc"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1, "plugin.json must suppress the fallback")
+	assert.Equal(t, "declared", parsed.Locals[0].Name)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "extra", parsed.Locals[0].Skills[0].Name,
+		"the skills/ dir still feeds the declared plugin via A4")
+}
+
+// E8: a malformed plugin.json is still a "manifest present" signal — the
+// fallback must not mask a real parse bug by emitting an empty synthetic
+// plugin.
+func TestScan_MalformedPluginJson_StillHasManifest_NoFallback(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(base, ".claude-plugin", "plugin.json"),
+		[]byte("not json"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(base, "skills"), 0o755))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	assert.Empty(t, parsed.Locals,
+		"malformed plugin.json counts as 'manifest present' — fallback must NOT run")
+}
+
+// E9: an existing skill.json must short-circuit the fallback too.
+func TestScan_SkillJsonExists_NoFallback(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"),
+		[]byte(`{"name":"ui-ux"}`), 0o644))
+	skillDir := filepath.Join(base, "skills", "design")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# design\ndesc"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	assert.Equal(t, "ui-ux", parsed.Locals[0].Name)
+}
+
+// E10: BFS mid-level safety. A sub-plugin dir reached via a parent's
+// marketplace.json declaration has a skills/ child but no own manifest.
+// Scan() at the sub level has Locals==[], so the fallback fires for the
+// sub dir — which is the intended behavior for a remote-fetched sub-plugin
+// without its own manifest. (BFS-level dedup happens in Walk(), not Scan().)
+func TestScan_NoManifest_SkillsAtBFSMidLevel_NoFallback(t *testing.T) {
+	subDir := t.TempDir()
+	skillDir := filepath.Join(subDir, "skills", "leaf")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("# leaf\ndesc"), 0o644))
+
+	parsed, err := Scan(subDir)
+	require.NoError(t, err)
+	// sub has no manifest of its own AND has skills/ → fallback SHOULD
+	// fire for Scan(sub) at this level, producing exactly one plugin.
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "leaf", parsed.Locals[0].Skills[0].Name)
+}
