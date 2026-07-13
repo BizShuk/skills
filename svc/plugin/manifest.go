@@ -506,3 +506,30 @@ func hasAnyConventionalSkillsDir(base string) bool {
 	}
 	return false
 }
+
+// isInsideAgentDir reports whether base sits inside a conventional agents/
+// directory. "Inside" means there is a path segment equal to "agents" that
+// is NOT the first meaningful segment of base (a repo whose root folder is
+// literally named "agents" is a valid fallback target — only nested
+// agents/ subdirectories count), or a ".claude"/".agents" segment
+// immediately followed by "agents". Path-segment match only — partial
+// names (e.g. "agents-keeper") do not match.
+func isInsideAgentDir(base string) bool {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(base)), "/")
+	// Strip the leading empty segment from absolute paths so the index
+	// math below lines up with "meaningful" path components.
+	meaningful := parts
+	if len(meaningful) > 0 && meaningful[0] == "" {
+		meaningful = meaningful[1:]
+	}
+	for i, seg := range meaningful {
+		if seg == "agents" && i > 0 {
+			return true
+		}
+		if (seg == ".claude" || seg == ".agents") &&
+			i+1 < len(meaningful) && meaningful[i+1] == "agents" {
+			return true
+		}
+	}
+	return false
+}

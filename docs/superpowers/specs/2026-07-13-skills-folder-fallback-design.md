@@ -99,7 +99,7 @@ synthetic plugin.
 
 | ID  | Condition                                                                                            |
 | --- | ---------------------------------------------------------------------------------------------------- |
-| C1  | `base` contains a path segment equal to `agents`, **or** a `.claude`/`.agents` segment immediately followed by `agents`, **and** that `agents` segment is **not** the final segment of `base` (a repo whose root folder is literally named `agents` is still a valid fallback target — only nested `agents/` directories are excluded). Path-segment match only (no substring on the whole path). |
+| C1  | `base` contains a path segment equal to `agents` that is **not** the first meaningful segment (i.e. the path has at least one segment before `agents` — so `/agents` itself is a valid fallback target, but `/repo/agents`, `/repo/agents/foo.md`, etc. are excluded), **or** a `.claude`/`.agents` segment immediately followed by `agents`. Path-segment match only (no substring on the whole path). |
 | C2  | BFS reached this `base` via a parent's marketplace / remote fetch (i.e. `n.parent != nil` in `Walk()`). The existing absorb-into-parent logic covers this. |
 | C3  | Skills are scattered in non-conventional subdirectories (`docs/`, `examples/`, `tests/`, ...). Only the three conventional top-level dirs are recognized. |
 | C4  | `agents/`, `docs/`, `examples/`, `tests/`, `build/`, `dist/`, etc. — none of these are skill sources unless the manifest names them via A4/A5. |

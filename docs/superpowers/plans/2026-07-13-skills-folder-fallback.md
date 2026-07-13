@@ -238,7 +238,7 @@ git commit -m "feat(plugin): add hasAnyConventionalSkillsDir helper"
 
 **Interfaces:**
 - Produces: `func isInsideAgentDir(base string) bool` — returns `true` if `base` sits inside a conventional agents directory. Specifically:
-  - any `agents` path segment that is **not** the final segment of `base`, OR
+  - any `agents` path segment that is **not** the first meaningful segment of `base` (so `/agents` and `./agents` are valid fallback targets, but `/repo/agents` is not), OR
   - a `.claude` or `.agents` segment immediately followed by `agents` (regardless of position).
   - Segment match only — partial names (e.g. `agents-keeper`) do not match.
 

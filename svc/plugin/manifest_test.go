@@ -535,3 +535,34 @@ func TestHasAnyConventionalSkillsDir(t *testing.T) {
 		assert.False(t, hasAnyConventionalSkillsDir(base))
 	})
 }
+
+// TestIsInsideAgentDir verifies the helper that protects the fallback from
+// mistaking a conventional agents/ layout (subagent definitions) for a
+// plugin. A repo whose ROOT is literally named "agents" is still a valid
+// fallback target — only nested agents/ directories count.
+func TestIsInsideAgentDir(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"plain root", "/repo/project", false},
+		{"repo root literally named agents", "/agents", false},
+		{"agents as last segment with trailing slash", "/agents/", false},
+		{"nested agents subdir", "/repo/project/agents", true},
+		{"nested agents subdir with file", "/repo/project/agents/foo.md", true},
+		{"dotclaude agents subdir", "/repo/project/.claude/agents", true},
+		{"dotclaude agents subdir with file", "/repo/project/.claude/agents/foo.md", true},
+		{"dotagents agents subdir", "/repo/project/.agents/agents", true},
+		{"partial name agents-keeper", "/repo/agents-keeper", false},
+		{"partial name myagents", "/repo/myagents", false},
+		{"agents hidden inside unrelated name", "/repo/data/agents-export/x", false},
+		{"relative plain", "plugins/foo", false},
+		{"relative inside agents", "plugins/agents/foo", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isInsideAgentDir(tc.path))
+		})
+	}
+}
