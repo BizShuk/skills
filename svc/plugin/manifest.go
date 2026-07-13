@@ -488,3 +488,21 @@ func hasAnyManifest(base string) bool {
 	}
 	return false
 }
+
+// hasAnyConventionalSkillsDir reports whether base contains at least one
+// of the three conventional top-level skills directories. A file (not a
+// directory) at any of the three paths does not count.
+func hasAnyConventionalSkillsDir(base string) bool {
+	paths := []string{
+		filepath.Join(base, "skills"),
+		filepath.Join(base, ".claude", "skills"),
+		filepath.Join(base, ".agents", "skills"),
+	}
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err == nil && info.IsDir() {
+			return true
+		}
+	}
+	return false
+}

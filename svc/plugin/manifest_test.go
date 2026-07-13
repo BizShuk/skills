@@ -501,3 +501,37 @@ func TestHasAnyManifest(t *testing.T) {
 		assert.True(t, hasAnyManifest(base))
 	})
 }
+
+// TestHasAnyConventionalSkillsDir verifies that the helper recognizes the
+// three conventional skills directories (skills/, .claude/skills/,
+// .agents/skills/) and ignores a file with the same name.
+func TestHasAnyConventionalSkillsDir(t *testing.T) {
+	t.Run("none present", func(t *testing.T) {
+		base := t.TempDir()
+		assert.False(t, hasAnyConventionalSkillsDir(base))
+	})
+
+	t.Run("skills only", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(base, "skills"), 0o755))
+		assert.True(t, hasAnyConventionalSkillsDir(base))
+	})
+
+	t.Run("dotclaude skills only", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude", "skills"), 0o755))
+		assert.True(t, hasAnyConventionalSkillsDir(base))
+	})
+
+	t.Run("dotagents skills only", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(base, ".agents", "skills"), 0o755))
+		assert.True(t, hasAnyConventionalSkillsDir(base))
+	})
+
+	t.Run("file with the name skills is not a directory", func(t *testing.T) {
+		base := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(base, "skills"), []byte("x"), 0o644))
+		assert.False(t, hasAnyConventionalSkillsDir(base))
+	})
+}
