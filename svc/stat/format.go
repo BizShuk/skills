@@ -6,13 +6,13 @@ import (
 	"math"
 	"sort"
 
-	"github.com/bizshuk/skills/utils"
+	"github.com/bizshuk/gosdk/tui"
 )
 
 // FormatReport 將完整統計結果以格式化文字輸出至 w。
 func FormatReport(w io.Writer, r *StatsResult) {
 	printOverallSummary(w, r)
-	
+
 	// 取得所有 Agent 列表，用於 Table 2 & Table 3 的欄位
 	agentsMap := make(map[string]bool)
 	for key := range r.GlobalData {
@@ -32,11 +32,11 @@ func FormatReport(w io.Writer, r *StatsResult) {
 func printOverallSummary(w io.Writer, r *StatsResult) {
 	total := r.TotalInput + r.TotalOutput
 	fmt.Fprintln(w, "=== 總體統計摘要 (Overall Summary) ===")
-	
-	tbl := utils.Table{
+
+	tbl := tui.Table{
 		Headers: []string{"Metric", "Value"},
 		Align:   []int{0, 0},
-		Rows: [][]utils.Cell{
+		Rows: [][]tui.Cell{
 			{"Total Tokens", fmt.Sprintf("%s (Input: %s, Output: %s)", formatToken(total), formatToken(r.TotalInput), formatToken(r.TotalOutput))},
 			{"Total Skills Used", fmt.Sprintf("%d", len(r.GlobalSkillCount))},
 			{"Total Tools Executed", fmt.Sprintf("%d", len(r.GlobalToolCount))},
@@ -84,7 +84,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 	}
 	sort.Strings(dates)
 
-	var rows [][]utils.Cell
+	var rows [][]tui.Cell
 	var separators []bool
 
 	for dateIndex, dateStr := range dates {
@@ -94,7 +94,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 		}
 		sort.Strings(dateAgents)
 
-		var dayRows [][]utils.Cell
+		var dayRows [][]tui.Cell
 		for _, agent := range dateAgents {
 			var dateModels []string
 			for m := range dateGroup[dateStr][agent] {
@@ -104,7 +104,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 
 			for _, model := range dateModels {
 				usage := dateGroup[dateStr][agent][model]
-				dayRows = append(dayRows, []utils.Cell{
+				dayRows = append(dayRows, []tui.Cell{
 					"", // 先留空，第一行會被日期覆蓋
 					agent,
 					model,
@@ -132,7 +132,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 	}
 
 	// 加上 Total 列
-	rows = append(rows, []utils.Cell{
+	rows = append(rows, []tui.Cell{
 		"Total",
 		"",
 		"",
@@ -141,7 +141,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 	})
 	separators = append(separators, false)
 
-	tbl := utils.Table{
+	tbl := tui.Table{
 		Headers:    []string{"Date", "Agent", "Model", "Token Input", "Token Output"},
 		Align:      []int{0, 0, 0, 1, 1}, // Token 數量靠右對齊
 		Rows:       rows,
@@ -179,9 +179,9 @@ func printTable2(w io.Writer, r *StatsResult, agents []string) {
 	agentTotals := make(map[string]int64)
 	var grandTotal int64
 
-	var rows [][]utils.Cell
+	var rows [][]tui.Cell
 	for _, sk := range allSkills {
-		row := []utils.Cell{sk}
+		row := []tui.Cell{sk}
 		var total int64
 		for _, agent := range agents {
 			count := skillPivot[sk][agent]
@@ -195,7 +195,7 @@ func printTable2(w io.Writer, r *StatsResult, agents []string) {
 	}
 
 	// 加上 Total 列
-	totalRow := []utils.Cell{"Total"}
+	totalRow := []tui.Cell{"Total"}
 	for _, agent := range agents {
 		totalRow = append(totalRow, fmt.Sprintf("%d", agentTotals[agent]))
 	}
@@ -211,7 +211,7 @@ func printTable2(w io.Writer, r *StatsResult, agents []string) {
 	headers := append([]string{"Skill Name"}, agents...)
 	headers = append(headers, "Sum")
 
-	tbl := utils.Table{
+	tbl := tui.Table{
 		Headers: headers,
 		Align:   aligns,
 		Rows:    rows,
@@ -248,9 +248,9 @@ func printTable3(w io.Writer, r *StatsResult, agents []string) {
 	agentTotals := make(map[string]int64)
 	var grandTotal int64
 
-	var rows [][]utils.Cell
+	var rows [][]tui.Cell
 	for _, t := range allTools {
-		row := []utils.Cell{t}
+		row := []tui.Cell{t}
 		var total int64
 		for _, agent := range agents {
 			count := toolPivot[t][agent]
@@ -264,7 +264,7 @@ func printTable3(w io.Writer, r *StatsResult, agents []string) {
 	}
 
 	// 加上 Total 列
-	totalRow := []utils.Cell{"Total"}
+	totalRow := []tui.Cell{"Total"}
 	for _, agent := range agents {
 		totalRow = append(totalRow, fmt.Sprintf("%d", agentTotals[agent]))
 	}
@@ -280,7 +280,7 @@ func printTable3(w io.Writer, r *StatsResult, agents []string) {
 	headers := append([]string{"Tool Name"}, agents...)
 	headers = append(headers, "Sum")
 
-	tbl := utils.Table{
+	tbl := tui.Table{
 		Headers: headers,
 		Align:   aligns,
 		Rows:    rows,
