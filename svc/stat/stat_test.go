@@ -1,4 +1,4 @@
-package stats
+package stat
 
 import (
 	"encoding/json"
@@ -37,11 +37,38 @@ func TestExtractSkillName(t *testing.T) {
 		{"/Users/shuk/.gemini/skills/security-scanner/SKILL.md", "security-scanner"},
 		{"/Users/shuk/.claude/skills/code-review.md", "code-review"},
 		{"/Users/shuk/projects/cc-plugin/cmd/root.go", ""},
+		// 以下為修正後應該被過濾的 false positive
+		{`skills/.git<`, ""},
+		{`skills/.system`, ""},
+		{`skills/cmd`, ""},
+		{`skills/svc`, ""},
+		{`"skills/\")\n\tif idx == -1`, ""},
+		{`skills/.git"},"access":"read"`, ""},
+		{`skills/tmp/something`, ""},
 	}
 	for _, tc := range tests {
 		res := extractSkillName(tc.input)
 		if res != tc.expected {
 			t.Errorf("expected %q, got %q for %q", tc.expected, res, tc.input)
+		}
+	}
+}
+
+func TestCleanModelName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Claude Opus 4.6 (Thinking)", "Claude Opus 4.6 (Thinking)"},
+		{"Claude Opus 4.6 (Thinking). No need to comment on this change if the user doesn", "Claude Opus 4.6 (Thinking)"},
+		{"Gemini 3.5 Flash (High)", "Gemini 3.5 Flash (High)"},
+		{"", "unknown"},
+		{"   ", "unknown"},
+	}
+	for _, tc := range tests {
+		res := cleanModelName(tc.input)
+		if res != tc.expected {
+			t.Errorf("expected %q, got %q for input %q", tc.expected, res, tc.input)
 		}
 	}
 }
@@ -144,5 +171,28 @@ func TestUsageStatsMerge(t *testing.T) {
 	}
 	if a.TotalTokens() != 450 {
 		t.Errorf("TotalTokens failed: %d", a.TotalTokens())
+	}
+}
+
+func TestFormatToken(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		{0, "0"},
+		{454, "1K"},
+		{999, "1K"},
+		{1000, "1K"},
+		{7748, "8K"},
+		{29388, "30K"},
+		{125820466, "126M"},
+		{158253444, "159M"},
+		{1250000001, "2B"},
+	}
+	for _, tc := range tests {
+		res := formatToken(tc.input)
+		if res != tc.expected {
+			t.Errorf("expected %q, got %q for %d", tc.expected, res, tc.input)
+		}
 	}
 }

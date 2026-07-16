@@ -6,6 +6,8 @@ package agent
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/mitchellh/go-homedir"
 )
 
 // AgentType is the canonical name of one supported agent (e.g. "claude-code").
@@ -36,6 +38,14 @@ type Agent struct {
 // never see stale paths, and the returned slice is a fresh copy to prevent
 // accidental mutation of the shared table.
 func Agents() []Agent {
+	homedir.DisableCache = true
+	expand := func(path string) string {
+		if expanded, err := homedir.Expand(path); err == nil {
+			return expanded
+		}
+		return path
+	}
+
 	src := LoadAll()
 	out := make([]Agent, 0, len(src))
 	for _, p := range src {
@@ -43,10 +53,10 @@ func Agents() []Agent {
 			Type:              p.Type,
 			DisplayName:       p.DisplayName,
 			ProjectSkillsDir:  p.ProjectSkillsDir,
-			UserSkillsDir:     ExpandHome(p.UserSkillsDir),
+			UserSkillsDir:     expand(p.UserSkillsDir),
 			ProjectAgentsDir:  p.ProjectAgentsDir,
-			UserAgentsDir:     ExpandHome(p.UserAgentsDir),
-			DetectDir:         ExpandHome(p.DetectDir),
+			UserAgentsDir:     expand(p.UserAgentsDir),
+			DetectDir:         expand(p.DetectDir),
 		})
 	}
 	return out

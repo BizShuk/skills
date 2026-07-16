@@ -1,4 +1,4 @@
-package stats
+package stat
 
 import (
 	"bufio"
@@ -10,12 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 )
 
 var (
-	codexToolRegex     = regexp.MustCompile(`tools\.([a-zA-Z0-9_]+)`)
-	antigravityModelRe = regexp.MustCompile(`Model Selection. from [^ ]+ to ([a-zA-Z0-9. ()\-+]+)`)
+	codexToolRegex = regexp.MustCompile(`tools\.([a-zA-Z0-9_]+)`)
+	// 擷取 model 名稱：匹配 "Model Selection` from ... to " 格式，model 名稱以大寫字母開頭。
+	antigravityModelRe = regexp.MustCompile("Model Selection` from [^ ]+ to ([A-Z][A-Za-z0-9. ()\\-+]+)")
+	// skill name 合法字元：只允許英數、底線、連字號。
+	validSkillNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 )
 
 func fallsOnDate(t time.Time, targetDate string, loc *time.Location) bool {
@@ -61,19 +65,58 @@ func extractSkillName(path string) string {
 		return ""
 	}
 	parts := strings.Split(sub, "/")
-	if len(parts) > 0 {
-		name := parts[0]
-		if strings.HasSuffix(name, ".md") {
-			name = strings.TrimSuffix(name, ".md")
-		}
-		return name
+	if len(parts) == 0 {
+		return ""
 	}
-	return ""
+	name := parts[0]
+	if strings.HasSuffix(name, ".md") {
+		name = strings.TrimSuffix(name, ".md")
+	}
+
+	// 驗證 skill name 合法性：必須以英文字母開頭，只允許英數、底線、連字號。
+	if !validSkillNameRe.MatchString(name) {
+		return ""
+	}
+
+	// 排除已知 false positive。
+	switch {
+	case strings.HasPrefix(name, "."):
+		return ""
+	case name == "cmd" || name == "svc" || name == "model" || name == "tmp":
+		return ""
+	}
+
+	return name
+}
+
+// cleanModelName 確保 model 名稱乾淨：在第一個「句號+空格」處截斷，移除尾部句號。
+func cleanModelName(raw string) string {
+	name := strings.TrimSpace(raw)
+	// 在第一個 ". " (句號+空格) 處截斷 — 分離 model 名稱與後續系統訊息。
+	if idx := strings.Index(name, ". "); idx != -1 {
+		name = name[:idx]
+	}
+	// 移除尾部句號。
+	name = strings.TrimRight(name, ".")
+	// 限制最大長度 60 字元。
+	const maxLen = 60
+	if len(name) > maxLen {
+		name = name[:maxLen]
+		name = strings.TrimRight(name, ". ")
+	}
+	if name == "" {
+		return "unknown"
+	}
+	return name
 }
 
 // ParseClaudeLogs parses Claude Code project session logs for a given date.
 func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	projectsDir := expandPath(viper.GetString("sources.claude.projects_dir"))
+	homedir.DisableCache = true
+	projectsDir := viper.GetString("sources.claude.projects_dir")
+	if exp, err := homedir.Expand(projectsDir); err == nil {
+		projectsDir = exp
+	}
 	targetStart, err := time.ParseInLocation("2006-01-02", targetDate, loc)
 	if err != nil {
 		return err
@@ -192,8 +235,15 @@ func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error 
 
 // ParseCodexLogs parses Codex session and archived rollout logs.
 func ParseCodexLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	sessionsDir := expandPath(viper.GetString("sources.codex.sessions_dir"))
-	archivedDir := expandPath(viper.GetString("sources.codex.archived_dir"))
+	homedir.DisableCache = true
+	sessionsDir := viper.GetString("sources.codex.sessions_dir")
+	if exp, err := homedir.Expand(sessionsDir); err == nil {
+		sessionsDir = exp
+	}
+	archivedDir := viper.GetString("sources.codex.archived_dir")
+	if exp, err := homedir.Expand(archivedDir); err == nil {
+		archivedDir = exp
+	}
 	_, err := time.ParseInLocation("2006-01-02", targetDate, loc)
 	if err != nil {
 		return err
@@ -309,9 +359,8 @@ func parseCodexFile(path string, ds *DayStats, targetDate string, loc *time.Loca
 	return nil
 }
 
-// ParseAntigravityLogs parses Antigravity session transcript logs.
-func ParseAntigravityLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	brainDir := expandPath(viper.GetString("sources.antigravity.brain_dir"))
+// ParseAntigravityBrainLogs parses session transcript logs in a generic brain directory.
+func ParseAntigravityBrainLogs(ds *DayStats, brainDir string, agentName string, targetDate string, loc *time.Location) error {
 	targetStart, err := time.ParseInLocation("2006-01-02", targetDate, loc)
 	if err != nil {
 		return err
@@ -339,7 +388,7 @@ func ParseAntigravityLogs(ds *DayStats, targetDate string, loc *time.Location) e
 		scanner := bufio.NewScanner(file)
 		scanner.Buffer(make([]byte, 1<<20), 10<<20)
 
-		currentModel := "antigravity"
+		currentModel := agentName
 
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -360,13 +409,13 @@ func ParseAntigravityLogs(ds *DayStats, targetDate string, loc *time.Location) e
 			// Try to detect model from settings changes in text
 			lineContent, _ := rawMap["content"].(string)
 			if mMatch := antigravityModelRe.FindStringSubmatch(lineContent); len(mMatch) > 1 {
-				currentModel = strings.TrimSpace(mMatch[1])
+				currentModel = cleanModelName(mMatch[1])
 			}
 
 			source, _ := rawMap["source"].(string)
 			lineType, _ := rawMap["type"].(string)
 
-			u := ds.Hourly[hourStr].GetOrCreate("antigravity", currentModel)
+			u := ds.Hourly[hourStr].GetOrCreate(agentName, currentModel)
 
 			// Estimate tokens
 			var inputTokens, outputTokens int64
@@ -415,4 +464,24 @@ func ParseAntigravityLogs(ds *DayStats, targetDate string, loc *time.Location) e
 		return err
 	}
 	return nil
+}
+
+// ParseAntigravityLogs parses Antigravity session transcript logs.
+func ParseAntigravityLogs(ds *DayStats, targetDate string, loc *time.Location) error {
+	homedir.DisableCache = true
+	brainDir := viper.GetString("sources.antigravity.brain_dir")
+	if exp, err := homedir.Expand(brainDir); err == nil {
+		brainDir = exp
+	}
+	return ParseAntigravityBrainLogs(ds, brainDir, "antigravity", targetDate, loc)
+}
+
+// ParseAntigravityCliLogs parses Antigravity CLI session transcript logs.
+func ParseAntigravityCliLogs(ds *DayStats, targetDate string, loc *time.Location) error {
+	homedir.DisableCache = true
+	brainDir := viper.GetString("sources.antigravity_cli.brain_dir")
+	if exp, err := homedir.Expand(brainDir); err == nil {
+		brainDir = exp
+	}
+	return ParseAntigravityBrainLogs(ds, brainDir, "antigravity-cli", targetDate, loc)
 }

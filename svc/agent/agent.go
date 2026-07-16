@@ -17,8 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -97,21 +95,4 @@ func parse(r io.Reader) (Provider, error) {
 		return Provider{}, fmt.Errorf("provider missing required field: type")
 	}
 	return p, nil
-}
-
-// ExpandHome replaces a leading "~/" with the current user's home directory.
-// Other paths are returned unchanged. The HOME environment variable is read
-// directly (not via go-homedir) to avoid the package-level cache that
-// defeats t.Setenv in tests.
-func ExpandHome(path string) string {
-	if !strings.HasPrefix(path, "~/") {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		// Fall back to env so a misconfigured system still produces
-		// a deterministic, non-empty result.
-		home = os.Getenv("HOME")
-	}
-	return filepath.Join(home, path[2:])
 }

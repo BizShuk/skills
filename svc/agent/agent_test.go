@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,17 +67,6 @@ func TestParseRejectsInvalidJSON(t *testing.T) {
 func TestParseRejectsMissingType(t *testing.T) {
 	_, err := parse(strings.NewReader(`{"displayName":"x"}`))
 	assert.Error(t, err)
-}
-
-func TestExpandHome(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("HOME", dir)
-
-	got := ExpandHome("~/skills")
-	assert.Equal(t, filepath.Join(dir, "skills"), got)
-
-	got = ExpandHome("/abs/path")
-	assert.Equal(t, "/abs/path", got)
 }
 
 // TestProviderJSONFilesAreValid ensures every file in providers/ parses cleanly.

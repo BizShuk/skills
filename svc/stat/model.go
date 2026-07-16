@@ -1,12 +1,15 @@
-package stats
+package stat
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"time"
 )
+
+// agentModelKey 是複合鍵 (Composite Key)，把 Agent + Model 兩個維度綁定在一起。
+type agentModelKey struct {
+	Agent string
+	Model string
+}
 
 // UsageStats 統一存放 Token 消耗、技能使用、工具呼叫。
 // 三條資料流合併為一個結構體，減少平行 map 的維護成本。
@@ -77,6 +80,7 @@ func (h *HourStats) GetOrCreate(agent, model string) *UsageStats {
 	return h.Usage[agent][model]
 }
 
+// DayStats 存放單日的逐時統計資料。
 type DayStats struct {
 	Date   string                `json:"date"`   // YYYY-MM-DD
 	Hourly map[string]*HourStats `json:"hourly"` // "0" to "23"
@@ -94,52 +98,6 @@ func NewDayStats(date string) *DayStats {
 		}
 	}
 	return ds
-}
-
-// expandPath expands ~ to home directory.
-func expandPath(p string) string {
-	if strings.HasPrefix(p, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return p
-		}
-		return filepath.Join(home, p[2:])
-	}
-	return p
-}
-
-func GetCacheFilePath(date string) string {
-	dataDir := expandPath("~/.config/cc-plugin/data")
-	return filepath.Join(dataDir, fmt.Sprintf("stats_%s.json", date))
-}
-
-func LoadCache(date string) (*DayStats, error) {
-	path := GetCacheFilePath(date)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var ds DayStats
-	if err := json.Unmarshal(data, &ds); err != nil {
-		return nil, err
-	}
-	return &ds, nil
-}
-
-func SaveCache(ds *DayStats) error {
-	path := GetCacheFilePath(ds.Date)
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create cache directory: %w", err)
-	}
-	data, err := json.MarshalIndent(ds, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal DayStats: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("failed to write cache file: %w", err)
-	}
-	return nil
 }
 
 // Merge merges stats from another DayStats into this one.
@@ -161,4 +119,40 @@ func (ds *DayStats) Merge(other *DayStats) {
 			}
 		}
 	}
+}
+
+// AggregatedBucket 存放單一時間區段的統計資料。
+// 使用複合鍵 (Composite Key) 搭配 *UsageStats，一層 map 取代三層嵌套。
+type AggregatedBucket struct {
+	Start time.Time
+	End   time.Time
+	Data  map[agentModelKey]*UsageStats
+}
+
+func NewAggregatedBucket(start, end time.Time) *AggregatedBucket {
+	return &AggregatedBucket{
+		Start: start,
+		End:   end,
+		Data:  make(map[agentModelKey]*UsageStats),
+	}
+}
+
+// getOrCreate 取得指定 agent+model 的 UsageStats，不存在則自動建立。
+func (b *AggregatedBucket) getOrCreate(agent, model string) *UsageStats {
+	key := agentModelKey{Agent: agent, Model: model}
+	if b.Data[key] == nil {
+		b.Data[key] = &UsageStats{}
+	}
+	return b.Data[key]
+}
+
+// StatsResult 封裝聚合後的完整統計結果。
+type StatsResult struct {
+	TotalInput       int64
+	TotalOutput      int64
+	GlobalData       map[agentModelKey]*UsageStats
+	GlobalSkillCount map[string]int64
+	GlobalToolCount  map[string]int64
+	SortedBucketUnix []int64
+	BucketMap        map[int64]*AggregatedBucket
 }
