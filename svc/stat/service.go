@@ -102,7 +102,7 @@ func Run(period, bucketDuration string) (*StatsResult, error) {
 	})
 
 	// Calculate Overall Statistics
-	var totalInput, totalOutput int64
+	var totalInput, totalCacheRead, totalCacheCreation, totalOutput int64
 	globalData := make(map[agentModelKey]*UsageStats)
 
 	for _, b := range bucketMap {
@@ -112,6 +112,8 @@ func Run(period, bucketDuration string) (*StatsResult, error) {
 			}
 			globalData[key].Merge(usage)
 			totalInput += usage.InputTokens
+			totalCacheRead += usage.CacheReadTokens
+			totalCacheCreation += usage.CacheCreationTokens
 			totalOutput += usage.OutputTokens
 		}
 	}
@@ -129,13 +131,15 @@ func Run(period, bucketDuration string) (*StatsResult, error) {
 	}
 
 	return &StatsResult{
-		TotalInput:       totalInput,
-		TotalOutput:      totalOutput,
-		GlobalData:       globalData,
-		GlobalSkillCount: globalSkillCount,
-		GlobalToolCount:  globalToolCount,
-		SortedBucketUnix: sortedBucketUnix,
-		BucketMap:        bucketMap,
+		TotalInput:         totalInput,
+		TotalCacheRead:     totalCacheRead,
+		TotalCacheCreation: totalCacheCreation,
+		TotalOutput:        totalOutput,
+		GlobalData:         globalData,
+		GlobalSkillCount:   globalSkillCount,
+		GlobalToolCount:    globalToolCount,
+		SortedBucketUnix:   sortedBucketUnix,
+		BucketMap:          bucketMap,
 	}, nil
 }
 

@@ -30,14 +30,15 @@ func FormatReport(w io.Writer, r *StatsResult) {
 }
 
 func printOverallSummary(w io.Writer, r *StatsResult) {
-	total := r.TotalInput + r.TotalOutput
+	cached := r.TotalCacheRead + r.TotalCacheCreation
+	total := r.TotalInput + cached + r.TotalOutput
 	fmt.Fprintln(w, "=== 總體統計摘要 (Overall Summary) ===")
 
 	tbl := tui.Table{
 		Headers: []string{"Metric", "Value"},
 		Align:   []int{0, 0},
 		Rows: [][]tui.Cell{
-			{"Total Tokens", fmt.Sprintf("%s (Input: %s, Output: %s)", formatToken(total), formatToken(r.TotalInput), formatToken(r.TotalOutput))},
+			{"Total Tokens", fmt.Sprintf("%s (Input: %s, Cached: %s, Output: %s)", formatToken(total), formatToken(r.TotalInput), formatToken(cached), formatToken(r.TotalOutput))},
 			{"Total Skills Used", fmt.Sprintf("%d", len(r.GlobalSkillCount))},
 			{"Total Tools Executed", fmt.Sprintf("%d", len(r.GlobalToolCount))},
 		},
@@ -48,6 +49,7 @@ func printOverallSummary(w io.Writer, r *StatsResult) {
 
 type tokenUsage struct {
 	Input  int64
+	Cached int64
 	Output int64
 }
 
@@ -57,7 +59,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 
 	// 依 Date -> Agent -> Model 聚合 Token
 	dateGroup := make(map[string]map[string]map[string]*tokenUsage)
-	var totalIn, totalOut int64
+	var totalIn, totalCached, totalOut int64
 
 	for _, b := range r.BucketMap {
 		dateStr := b.Start.Format("2006-01-02")
@@ -72,8 +74,10 @@ func printTable1(w io.Writer, r *StatsResult) {
 				dateGroup[dateStr][key.Agent][key.Model] = &tokenUsage{}
 			}
 			dateGroup[dateStr][key.Agent][key.Model].Input += usage.InputTokens
+			dateGroup[dateStr][key.Agent][key.Model].Cached += usage.CacheReadTokens + usage.CacheCreationTokens
 			dateGroup[dateStr][key.Agent][key.Model].Output += usage.OutputTokens
 			totalIn += usage.InputTokens
+			totalCached += usage.CacheReadTokens + usage.CacheCreationTokens
 			totalOut += usage.OutputTokens
 		}
 	}
@@ -109,6 +113,7 @@ func printTable1(w io.Writer, r *StatsResult) {
 					agent,
 					model,
 					formatToken(usage.Input),
+					formatToken(usage.Cached),
 					formatToken(usage.Output),
 				})
 			}
@@ -137,13 +142,14 @@ func printTable1(w io.Writer, r *StatsResult) {
 		"",
 		"",
 		formatToken(totalIn),
+		formatToken(totalCached),
 		formatToken(totalOut),
 	})
 	separators = append(separators, false)
 
 	tbl := tui.Table{
-		Headers:    []string{"Date", "Agent", "Model", "Token Input", "Token Output"},
-		Align:      []int{0, 0, 0, 1, 1}, // Token 數量靠右對齊
+		Headers:    []string{"Date", "Agent", "Model", "Token Input", "Token Cached", "Token Output"},
+		Align:      []int{0, 0, 0, 1, 1, 1}, // Token 數量靠右對齊
 		Rows:       rows,
 		Separators: separators,
 	}

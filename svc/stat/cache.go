@@ -30,6 +30,9 @@ func LoadCache(date string) (*DayStats, error) {
 	if err := json.Unmarshal(data, &ds); err != nil {
 		return nil, err
 	}
+	if ds.Version != dayStatsVersion {
+		return nil, fmt.Errorf("unsupported stats cache version %d", ds.Version)
+	}
 	return &ds, nil
 }
 

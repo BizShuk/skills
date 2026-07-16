@@ -150,17 +150,19 @@ func TestDayStatsMerge(t *testing.T) {
 
 func TestUsageStatsMerge(t *testing.T) {
 	a := &UsageStats{InputTokens: 100, OutputTokens: 50}
+	a.AddTokenUsage(100, 20, 30, 50)
 	a.AddSkill("sk1", 2)
 	a.AddTool("t1", 3)
 
 	b := &UsageStats{InputTokens: 200, OutputTokens: 100}
+	b.AddTokenUsage(200, 40, 50, 100)
 	b.AddSkill("sk1", 1)
 	b.AddSkill("sk2", 5)
 	b.AddTool("t1", 1)
 
 	a.Merge(b)
 
-	if a.InputTokens != 300 || a.OutputTokens != 150 {
+	if a.InputTokens != 600 || a.CacheReadTokens != 60 || a.CacheCreationTokens != 80 || a.OutputTokens != 300 {
 		t.Errorf("token merge failed: %+v", a)
 	}
 	if a.Skills["sk1"] != 3 || a.Skills["sk2"] != 5 {
@@ -169,7 +171,7 @@ func TestUsageStatsMerge(t *testing.T) {
 	if a.Tools["t1"] != 4 {
 		t.Errorf("tool merge failed: %v", a.Tools)
 	}
-	if a.TotalTokens() != 450 {
+	if a.TotalTokens() != 1040 {
 		t.Errorf("TotalTokens failed: %d", a.TotalTokens())
 	}
 }

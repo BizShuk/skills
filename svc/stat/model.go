@@ -14,14 +14,24 @@ type agentModelKey struct {
 // UsageStats 統一存放 Token 消耗、技能使用、工具呼叫。
 // 三條資料流合併為一個結構體，減少平行 map 的維護成本。
 type UsageStats struct {
-	InputTokens  int64            `json:"input_tokens"`
-	OutputTokens int64            `json:"output_tokens"`
-	Skills       map[string]int64 `json:"skills,omitempty"`
-	Tools        map[string]int64 `json:"tools,omitempty"`
+	InputTokens         int64            `json:"input_tokens"`
+	CacheReadTokens     int64            `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64            `json:"cache_creation_tokens,omitempty"`
+	OutputTokens        int64            `json:"output_tokens"`
+	Skills              map[string]int64 `json:"skills,omitempty"`
+	Tools               map[string]int64 `json:"tools,omitempty"`
 }
 
 func (u *UsageStats) AddTokens(input, output int64) {
 	u.InputTokens += input
+	u.OutputTokens += output
+}
+
+// AddTokenUsage adds input, cache, and output tokens as separate counters.
+func (u *UsageStats) AddTokenUsage(input, cacheRead, cacheCreation, output int64) {
+	u.InputTokens += input
+	u.CacheReadTokens += cacheRead
+	u.CacheCreationTokens += cacheCreation
 	u.OutputTokens += output
 }
 
@@ -45,6 +55,8 @@ func (u *UsageStats) Merge(other *UsageStats) {
 		return
 	}
 	u.InputTokens += other.InputTokens
+	u.CacheReadTokens += other.CacheReadTokens
+	u.CacheCreationTokens += other.CacheCreationTokens
 	u.OutputTokens += other.OutputTokens
 	for sk, count := range other.Skills {
 		u.AddSkill(sk, count)
@@ -56,7 +68,7 @@ func (u *UsageStats) Merge(other *UsageStats) {
 
 // TotalTokens 回傳輸入+輸出 token 總和。
 func (u *UsageStats) TotalTokens() int64 {
-	return u.InputTokens + u.OutputTokens
+	return u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens + u.OutputTokens
 }
 
 // HourStats 存放某小時內各 agent+model 的統計。
@@ -82,14 +94,18 @@ func (h *HourStats) GetOrCreate(agent, model string) *UsageStats {
 
 // DayStats 存放單日的逐時統計資料。
 type DayStats struct {
-	Date   string                `json:"date"`   // YYYY-MM-DD
-	Hourly map[string]*HourStats `json:"hourly"` // "0" to "23"
+	Version int                   `json:"version"`
+	Date    string                `json:"date"`   // YYYY-MM-DD
+	Hourly  map[string]*HourStats `json:"hourly"` // "0" to "23"
 }
+
+const dayStatsVersion = 2
 
 func NewDayStats(date string) *DayStats {
 	ds := &DayStats{
-		Date:   date,
-		Hourly: make(map[string]*HourStats),
+		Version: dayStatsVersion,
+		Date:    date,
+		Hourly:  make(map[string]*HourStats),
 	}
 	for i := 0; i < 24; i++ {
 		hourStr := fmt.Sprintf("%d", i)
@@ -148,11 +164,13 @@ func (b *AggregatedBucket) getOrCreate(agent, model string) *UsageStats {
 
 // StatsResult 封裝聚合後的完整統計結果。
 type StatsResult struct {
-	TotalInput       int64
-	TotalOutput      int64
-	GlobalData       map[agentModelKey]*UsageStats
-	GlobalSkillCount map[string]int64
-	GlobalToolCount  map[string]int64
-	SortedBucketUnix []int64
-	BucketMap        map[int64]*AggregatedBucket
+	TotalInput         int64
+	TotalCacheRead     int64
+	TotalCacheCreation int64
+	TotalOutput        int64
+	GlobalData         map[agentModelKey]*UsageStats
+	GlobalSkillCount   map[string]int64
+	GlobalToolCount    map[string]int64
+	SortedBucketUnix   []int64
+	BucketMap          map[int64]*AggregatedBucket
 }

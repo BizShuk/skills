@@ -110,6 +110,52 @@ func cleanModelName(raw string) string {
 	return name
 }
 
+type claudeTokenEntry struct {
+	requestID     string
+	timestamp     time.Time
+	model         string
+	hasStopReason bool
+	stopReason    string
+	inputTokens   int64
+	cacheRead     int64
+	cacheCreation int64
+	outputTokens  int64
+}
+
+func selectClaudeTokenEntries(entries []claudeTokenEntry) []claudeTokenEntry {
+	groups := make(map[string][]claudeTokenEntry)
+	processed := make(map[string]bool)
+	selected := make([]claudeTokenEntry, 0, len(entries))
+
+	for _, entry := range entries {
+		if entry.requestID != "" {
+			groups[entry.requestID] = append(groups[entry.requestID], entry)
+		}
+	}
+
+	for _, entry := range entries {
+		if entry.requestID == "" {
+			selected = append(selected, entry)
+			continue
+		}
+		if processed[entry.requestID] {
+			continue
+		}
+		processed[entry.requestID] = true
+
+		group := groups[entry.requestID]
+		chosen := group[len(group)-1]
+		for _, candidate := range group {
+			if candidate.hasStopReason && candidate.stopReason != "" {
+				chosen = candidate
+			}
+		}
+		selected = append(selected, chosen)
+	}
+
+	return selected
+}
+
 // ParseClaudeLogs parses Claude Code project session logs for a given date.
 func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error {
 	homedir.DisableCache = true
@@ -144,6 +190,7 @@ func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error 
 		scanner := bufio.NewScanner(file)
 		// 10MB scanner buffer limit
 		scanner.Buffer(make([]byte, 1<<20), 10<<20)
+		var tokenEntries []claudeTokenEntry
 
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -154,11 +201,9 @@ func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error 
 
 			rawTS := rawMap["timestamp"]
 			t, ok := parseTime(rawTS)
-			if !ok || !fallsOnDate(t, targetDate, loc) {
+			if !ok {
 				continue
 			}
-
-			hourStr := getHourString(t, loc)
 
 			// Check type
 			lineType, _ := rawMap["type"].(string)
@@ -174,25 +219,37 @@ func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error 
 					modelName = "claude-code"
 				}
 
-				u := ds.Hourly[hourStr].GetOrCreate("claude-code", modelName)
-
-				// Sum tokens
-				var inputTokens, outputTokens int64
 				if usage, ok := msg["usage"].(map[string]any); ok {
+					requestID, _ := rawMap["requestId"].(string)
+					stopReason, hasStopReason := msg["stop_reason"]
+					stopReasonString, _ := stopReason.(string)
+					entry := claudeTokenEntry{
+						requestID:     requestID,
+						timestamp:     t,
+						model:         modelName,
+						hasStopReason: hasStopReason,
+						stopReason:    stopReasonString,
+					}
 					if in, ok := usage["input_tokens"].(float64); ok {
-						inputTokens += int64(in)
+						entry.inputTokens = int64(in)
 					}
 					if cacheCreate, ok := usage["cache_creation_input_tokens"].(float64); ok {
-						inputTokens += int64(cacheCreate)
+						entry.cacheCreation = int64(cacheCreate)
 					}
 					if cacheRead, ok := usage["cache_read_input_tokens"].(float64); ok {
-						inputTokens += int64(cacheRead)
+						entry.cacheRead = int64(cacheRead)
 					}
 					if out, ok := usage["output_tokens"].(float64); ok {
-						outputTokens += int64(out)
+						entry.outputTokens = int64(out)
 					}
+					tokenEntries = append(tokenEntries, entry)
 				}
-				u.AddTokens(inputTokens, outputTokens)
+
+				if !fallsOnDate(t, targetDate, loc) {
+					continue
+				}
+				hourStr := getHourString(t, loc)
+				u := ds.Hourly[hourStr].GetOrCreate("claude-code", modelName)
 
 				// Parse content for tools and skills
 				if contentList, ok := msg["content"].([]any); ok {
@@ -223,6 +280,19 @@ func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error 
 					}
 				}
 			}
+		}
+
+		for _, entry := range selectClaudeTokenEntries(tokenEntries) {
+			if !fallsOnDate(entry.timestamp, targetDate, loc) {
+				continue
+			}
+			hourStr := getHourString(entry.timestamp, loc)
+			ds.Hourly[hourStr].GetOrCreate("claude-code", entry.model).AddTokenUsage(
+				entry.inputTokens,
+				entry.cacheRead,
+				entry.cacheCreation,
+				entry.outputTokens,
+			)
 		}
 		return nil
 	})
@@ -324,17 +394,17 @@ func parseCodexFile(path string, ds *DayStats, targetDate string, loc *time.Loca
 				if pType == "token_count" {
 					if info, ok := payload["info"].(map[string]any); ok {
 						if lastUsage, ok := info["last_token_usage"].(map[string]any); ok {
-							var input, output int64
+							var input, cached, output int64
 							if in, ok := lastUsage["input_tokens"].(float64); ok {
 								input += int64(in)
 							}
-							if cached, ok := lastUsage["cached_input_tokens"].(float64); ok {
-								input += int64(cached)
+							if cachedValue, ok := lastUsage["cached_input_tokens"].(float64); ok {
+								cached = int64(cachedValue)
 							}
 							if out, ok := lastUsage["output_tokens"].(float64); ok {
 								output += int64(out)
 							}
-							ds.Hourly[hourStr].GetOrCreate("codex", currentModel).AddTokens(input, output)
+							ds.Hourly[hourStr].GetOrCreate("codex", currentModel).AddTokenUsage(input, cached, 0, output)
 						}
 					}
 				}
