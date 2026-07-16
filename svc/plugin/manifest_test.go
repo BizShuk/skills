@@ -101,6 +101,67 @@ func TestScan_PluginJsonOnly(t *testing.T) {
 	assert.True(t, names["extra"], "additive skill present")
 }
 
+// TestScan_MarketplaceNestedPluginManifestSkillsDirectory reproduces the
+// blender-toolkit layout: the marketplace entry points at a local plugin,
+// whose own plugin.json declares a directory that contains SKILL.md directly.
+func TestScan_MarketplaceNestedPluginManifestSkillsDirectory(t *testing.T) {
+	base := t.TempDir()
+	marketplaceDir := filepath.Join(base, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(marketplaceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(marketplaceDir, "marketplace.json"), []byte(`{
+		"plugins": [{
+			"name": "blender-toolkit",
+			"source": "./plugins/blender-toolkit"
+		}]
+	}`), 0o644))
+
+	pluginDir := filepath.Join(base, "plugins", "blender-toolkit")
+	pluginManifestDir := filepath.Join(pluginDir, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pluginManifestDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginManifestDir, "plugin.json"), []byte(`{
+		"name": "blender-toolkit",
+		"skills": ["./skills"]
+	}`), 0o644))
+
+	skillDir := filepath.Join(pluginDir, "skills")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: blender-toolkit
+description: Blender automation toolkit.
+---
+`), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	assert.Equal(t, "blender-toolkit", parsed.Locals[0].Name)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, skillDir, parsed.Locals[0].Skills[0].Path)
+}
+
+// TestScan_PluginManifestSkillCollectionDirectory verifies that a custom
+// manifest directory containing direct <name>/SKILL.md children is scanned.
+func TestScan_PluginManifestSkillCollectionDirectory(t *testing.T) {
+	base := t.TempDir()
+	pluginManifestDir := filepath.Join(base, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pluginManifestDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginManifestDir, "plugin.json"), []byte(`{
+		"name": "custom-toolkit",
+		"skills": ["./custom-skills"]
+	}`), 0o644))
+
+	skillDir := filepath.Join(base, "custom-skills", "alpha")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Alpha\n"), 0o644))
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+	require.Len(t, parsed.Locals[0].Skills, 1)
+	assert.Equal(t, "alpha", parsed.Locals[0].Skills[0].Name)
+	assert.Equal(t, skillDir, parsed.Locals[0].Skills[0].Path)
+}
+
 // TestScan_SelfMarketplaceAndPluginJsonDedup reproduces the real-world
 // bizshuk/gosdk layout: a repo that ships BOTH a marketplace.json whose only
 // plugin points at itself (source "./") AND a plugin.json at root, both naming
@@ -272,9 +333,6 @@ func TestScan_DescriptionReadsYAMLFrontmatterMultiline(t *testing.T) {
 	assert.Equal(t, "Use when managing Apple reminders on macOS.", parsed.Locals[0].Skills[0].Description)
 }
 
-
-
-
 // TestScan_SkipsReadmeMDInAgentsDir verifies that README.md inside an agents/
 // directory is NOT treated as a subagent. README.md is a directory-level doc,
 // not a subagent definition.
@@ -301,6 +359,7 @@ func TestScan_SkipsReadmeMDInAgentsDir(t *testing.T) {
 	assert.Equal(t, "code-reviewer", subs[0].Name,
 		"only the real subagent .md file should be picked up")
 }
+
 // TestScan_NestedMarketplaceSubPlugins_OptInTopLevel verifies that a nested
 // marketplace whose sub-plugin uses the "flat .md" layout (top-level .md
 // files in the sub-plugin base) only picks them up as subagents when the
@@ -395,6 +454,7 @@ func TestScan_NestedMarketplaceSubPluginAgentsDir(t *testing.T) {
 	require.Len(t, lp.Subagents, 1)
 	assert.Equal(t, "coordinator", lp.Subagents[0].Name)
 }
+
 // TestScan_AgentsFieldInPluginManifest verifies that a plugin.json's "agents"
 // array (relative paths to .md files in the plugin base) is loaded as
 // subagents. Mirrors the canonical pattern used by both cc-plugin's "review"

@@ -101,11 +101,11 @@ func dedupeLocalsByBase(locals []model.LocalPlugin) []model.LocalPlugin {
 
 // marketplacePlugin describes one entry under the marketplace's `plugins[]`.
 type marketplacePlugin struct {
-	Name   string          `json:"name"`
-	Source json.RawMessage `json:"source"` // string | remote-object
-	Skills          []string `json:"skills"`
-	Agents          []string `json:"agents"`
-	TopLevelAgents  bool     `json:"topLevelAgents"`
+	Name           string          `json:"name"`
+	Source         json.RawMessage `json:"source"` // string | remote-object
+	Skills         []string        `json:"skills"`
+	Agents         []string        `json:"agents"`
+	TopLevelAgents bool            `json:"topLevelAgents"`
 }
 
 type marketplaceManifest struct {
@@ -116,10 +116,10 @@ type marketplaceManifest struct {
 }
 
 type pluginManifest struct {
-	Name   string   `json:"name"`
-	Skills           []string `json:"skills"`
-	Agents           []string `json:"agents"`
-	TopLevelAgents   bool     `json:"topLevelAgents"`
+	Name           string   `json:"name"`
+	Skills         []string `json:"skills"`
+	Agents         []string `json:"agents"`
+	TopLevelAgents bool     `json:"topLevelAgents"`
 }
 
 // scanMarketplace reads `<base>/.claude-plugin/marketplace.json` (if present)
@@ -172,8 +172,12 @@ func scanMarketplace(base string, out *model.Parsed) error {
 		if !isContainedIn(pluginBase, base) {
 			continue
 		}
+		skillPaths := append([]string(nil), p.Skills...)
+		if mf, ok := readPluginManifest(pluginBase); ok {
+			skillPaths = append(skillPaths, mf.Skills...)
+		}
 		lp := model.LocalPlugin{Name: p.Name, Base: pluginBase, TopLevelAgents: p.TopLevelAgents, AgentPaths: p.Agents}
-		scanSkills(base, &lp, p.Skills)
+		scanSkills(base, &lp, skillPaths)
 		out.Locals = append(out.Locals, lp)
 	}
 	return nil
@@ -182,21 +186,26 @@ func scanMarketplace(base string, out *model.Parsed) error {
 // scanPluginAtBase reads `<base>/.claude-plugin/plugin.json` (single plugin)
 // and appends it to out as a model.LocalPlugin whose Base is base itself.
 func scanPluginAtBase(base string, out *model.Parsed) error {
-	data, err := os.ReadFile(filepath.Join(base, ".claude-plugin", "plugin.json"))
-	if err != nil {
-		return nil
-	}
-	var mf pluginManifest
-	if err := json.Unmarshal(data, &mf); err != nil {
-		return nil
-	}
-	if mf.Name == "" {
+	mf, ok := readPluginManifest(base)
+	if !ok {
 		return nil
 	}
 	lp := model.LocalPlugin{Name: mf.Name, Base: base, TopLevelAgents: mf.TopLevelAgents, AgentPaths: mf.Agents}
 	scanSkills(base, &lp, mf.Skills)
 	out.Locals = append(out.Locals, lp)
 	return nil
+}
+
+func readPluginManifest(base string) (pluginManifest, bool) {
+	data, err := os.ReadFile(filepath.Join(base, ".claude-plugin", "plugin.json"))
+	if err != nil {
+		return pluginManifest{}, false
+	}
+	var mf pluginManifest
+	if err := json.Unmarshal(data, &mf); err != nil || mf.Name == "" {
+		return pluginManifest{}, false
+	}
+	return mf, true
 }
 
 // classifyRemote maps the object form of `source` to a model.RemotePlugin.
@@ -328,26 +337,61 @@ func scanSkills(base string, lp *model.LocalPlugin, additive []string) {
 		}
 	}
 
-	// Additive: each entry is a path to SKILL.md relative to lp.Base.
-	// The skill dir is its parent directory.
+	// Additive paths may identify a SKILL.md file, a directory containing
+	// SKILL.md directly, or a collection of direct <name>/SKILL.md children.
 	for _, sp := range additive {
-		if !strings.HasPrefix(sp, "./") {
-			continue
+		for _, skillDir := range resolveManifestSkillDirs(base, lp.Base, sp) {
+			add(skillDir)
 		}
-		candidate := filepath.Join(lp.Base, sp)
-		skillDir := filepath.Dir(candidate)
-		if !isContainedIn(skillDir, base) {
-			continue
-		}
-		skillFile := filepath.Join(skillDir, "SKILL.md")
-		if _, err := os.Stat(skillFile); err != nil {
-			continue
-		}
-		add(skillDir)
 	}
 
 	// Subagents: scan .md files under agents/ directories.
 	scanSubagents(lp)
+}
+
+func resolveManifestSkillDirs(base, pluginBase, manifestPath string) []string {
+	if !strings.HasPrefix(manifestPath, "./") {
+		return nil
+	}
+	candidate := filepath.Join(pluginBase, manifestPath)
+	if !isContainedIn(candidate, base) {
+		return nil
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return nil
+	}
+	if !info.IsDir() {
+		skillDir := filepath.Dir(candidate)
+		if filepath.Base(candidate) == "SKILL.md" && hasSkillFile(skillDir) {
+			return []string{skillDir}
+		}
+		return nil
+	}
+	if hasSkillFile(candidate) {
+		return []string{candidate}
+	}
+
+	entries, err := os.ReadDir(candidate)
+	if err != nil {
+		return nil
+	}
+	var skillDirs []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skillDir := filepath.Join(candidate, entry.Name())
+		if hasSkillFile(skillDir) {
+			skillDirs = append(skillDirs, skillDir)
+		}
+	}
+	return skillDirs
+}
+
+func hasSkillFile(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "SKILL.md"))
+	return err == nil && !info.IsDir()
 }
 
 // scanSubagents populates lp.Subagents from three sources, in order:
@@ -463,7 +507,6 @@ const descMaxChars = 60
 // scanSubagents call sites below — the parser itself moved to
 // model.ReadDescription so it can be shared with the remove flow.
 func readDescription(path string) string { return model.ReadDescription(path) }
-
 
 // isContainedIn reports whether target resolves to a path inside (or equal
 // to) base. It cleans both sides and uses filepath.Rel — a target outside
