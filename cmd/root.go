@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/bizshuk/skills/cmd/stats"
 	"github.com/bizshuk/skills/svc/agent"
 	"github.com/bizshuk/skills/svc/plugin"
 	"github.com/bizshuk/skills/svc/tui"
@@ -26,6 +27,7 @@ import (
 // root-level main in this repo prints them and exits non-zero.
 func Execute() error {
 	root := &cobra.Command{Use: "skills", SilenceUsage: true}
+
 	var global bool
 	var agents []string
 	var depth int
@@ -127,10 +129,10 @@ func Execute() error {
 	root.AddCommand(updateCmd)
 
 	var (
-		removeAgents []string
-		removeGlobal bool
+		removeAgents  []string
+		removeGlobal  bool
 		removeProject bool
-		removeYes    bool
+		removeYes     bool
 	)
 	removeCmd := &cobra.Command{
 		Use:   "remove",
@@ -145,6 +147,7 @@ func Execute() error {
 	removeCmd.Flags().BoolVar(&removeYes, "yes", false, "auto-check all and skip the y/N confirm prompt")
 	removeCmd.MarkFlagsMutuallyExclusive("global", "project")
 	root.AddCommand(removeCmd)
+	root.AddCommand(stats.StatsCmd())
 
 	return root.Execute()
 }
