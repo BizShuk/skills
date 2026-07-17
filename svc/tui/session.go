@@ -122,6 +122,42 @@ func (m SessionModel) activeItems() []model.AgentSession {
 	return m.tabs[m.activeAgent].items
 }
 
+func (m *SessionModel) saveActivePosition() {
+	if m.activeAgent < 0 || m.activeAgent >= len(m.tabs) {
+		return
+	}
+	if m.cursorByAgent == nil {
+		m.cursorByAgent = make(map[string]int)
+	}
+	if m.offsetByAgent == nil {
+		m.offsetByAgent = make(map[string]int)
+	}
+	agent := m.activeAgentName()
+	m.cursorByAgent[agent] = m.cursor
+	m.offsetByAgent[agent] = m.offset
+}
+
+func (m *SessionModel) loadActivePosition() {
+	if m.activeAgent < 0 || m.activeAgent >= len(m.tabs) {
+		return
+	}
+	agent := m.activeAgentName()
+	m.cursor = m.cursorByAgent[agent]
+	m.offset = m.offsetByAgent[agent]
+}
+
+func (m *SessionModel) switchAgent(delta int) {
+	if len(m.tabs) <= 1 {
+		return
+	}
+	m.saveActivePosition()
+	m.activeAgent = (m.activeAgent + delta + len(m.tabs)) % len(m.tabs)
+	m.items = append([]model.AgentSession(nil), m.tabs[m.activeAgent].items...)
+	m.loadActivePosition()
+	m.ensureListCursorVisible()
+	m.saveActivePosition()
+}
+
 // Init satisfies tea.Model. Session detail loading starts only after a user
 // opens a row, so the initial list needs no command.
 func (m SessionModel) Init() tea.Cmd {
@@ -172,7 +208,11 @@ func (m SessionModel) updateKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m.ensureListCursorVisible()
 			}
-		case tea.KeyRight, tea.KeyEnter:
+		case tea.KeyLeft:
+			m.switchAgent(-1)
+		case tea.KeyRight:
+			m.switchAgent(1)
+		case tea.KeyEnter:
 			return m.openSelected()
 		case tea.KeyEsc:
 			return m, tea.Quit

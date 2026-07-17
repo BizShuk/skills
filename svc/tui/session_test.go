@@ -65,7 +65,7 @@ func sessionIDs(items []model.AgentSession) []string {
 	return ids
 }
 
-func TestSessionModelRightArrowLoadsDetail(t *testing.T) {
+func TestSessionModelEnterLoadsDetail(t *testing.T) {
 	want := model.AgentSessionDetail{
 		Session: sampleSessions()[0],
 		Title:   "Inspect parser",
@@ -81,7 +81,7 @@ func TestSessionModelRightArrowLoadsDetail(t *testing.T) {
 	}
 
 	m := NewSessionModel(sampleSessions(), loader)
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = mustSessionModel(t, updated)
 	require.NotNil(t, cmd)
 	assert.Contains(t, m.View(), "Loading")
@@ -94,14 +94,69 @@ func TestSessionModelRightArrowLoadsDetail(t *testing.T) {
 	assert.Contains(t, m.View(), "hello")
 }
 
+func TestSessionModelAgentTabSwitchRestoresCursorAndOffset(t *testing.T) {
+	items := []model.AgentSession{
+		{Agent: "codex", ID: "codex-1"},
+		{Agent: "codex", ID: "codex-2"},
+		{Agent: "codex", ID: "codex-3"},
+		{Agent: "claude-code", ID: "claude-1"},
+	}
+	m := NewSessionModel(items, nil)
+	m.viewportHeight = 1
+
+	for range 2 {
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mustSessionModel(t, updated)
+		assert.Nil(t, cmd)
+	}
+	assert.Equal(t, 2, m.cursor)
+	assert.Equal(t, 2, m.offset)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = mustSessionModel(t, updated)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 1, m.activeAgent)
+	assert.Equal(t, []string{"claude-1"}, sessionIDs(m.items))
+	assert.Equal(t, 0, m.cursor)
+	assert.Equal(t, 0, m.offset)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = mustSessionModel(t, updated)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 0, m.activeAgent)
+	assert.Equal(t, []string{"codex-1", "codex-2", "codex-3"}, sessionIDs(m.items))
+	assert.Equal(t, 2, m.cursor)
+	assert.Equal(t, 2, m.offset)
+}
+
+func TestSessionModelAgentTabSwitchWraps(t *testing.T) {
+	m := NewSessionModel(sampleSessions(), nil)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = mustSessionModel(t, updated)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 1, m.activeAgent)
+	assert.Equal(t, "codex", m.activeAgentName())
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = mustSessionModel(t, updated)
+	assert.Nil(t, cmd)
+	assert.Equal(t, 0, m.activeAgent)
+	assert.Equal(t, "claude-code", m.activeAgentName())
+}
+
 func TestSessionModelMouseClickLoadsClickedRow(t *testing.T) {
+	items := []model.AgentSession{
+		{Agent: "codex", ID: "session-1"},
+		{Agent: "codex", ID: "session-2"},
+	}
 	var selected string
 	loader := func(item model.AgentSession) (model.AgentSessionDetail, error) {
 		selected = item.ID
 		return model.AgentSessionDetail{Session: item}, nil
 	}
 
-	m := NewSessionModel(sampleSessions(), loader)
+	m := NewSessionModel(items, loader)
 	updated, cmd := m.Update(tea.MouseMsg{
 		X:      2,
 		Y:      sessionListFirstRow + 1,
@@ -128,7 +183,7 @@ func TestSessionModelEscAndLeftReturnToList(t *testing.T) {
 
 	for _, key := range []tea.KeyType{tea.KeyEsc, tea.KeyLeft} {
 		m := NewSessionModel(sampleSessions(), loader)
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = mustSessionModel(t, updated)
 		updated, _ = m.Update(cmd().(detailLoadedMsg))
 		m = mustSessionModel(t, updated)
