@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mitchellh/go-homedir"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,11 +36,28 @@ func TestProviderFieldsRoundTripViaJSON(t *testing.T) {
 			assert.NotEmpty(t, p.ProjectAgentsDir, "ProjectAgentsDir empty for %s", p.Type)
 			assert.NotEmpty(t, p.UserAgentsDir, "UserAgentsDir empty for %s", p.Type)
 			assert.NotEmpty(t, p.DetectDir, "DetectDir empty for %s", p.Type)
+			assert.NotNil(t, p.SessionDirs, "SessionDirs nil for %s", p.Type)
 			// user-side paths must start with "~/" (the agent package expands at use time)
 			assert.True(t, strings.HasPrefix(p.UserSkillsDir, "~/"), "UserSkillsDir not ~/: %s", p.UserSkillsDir)
 			assert.True(t, strings.HasPrefix(p.UserAgentsDir, "~/"), "UserAgentsDir not ~/: %s", p.UserAgentsDir)
 			assert.True(t, strings.HasPrefix(p.DetectDir, "~/"), "DetectDir not ~/: %s", p.DetectDir)
 		})
+	}
+}
+
+func TestProviderSessionDirsExpandHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	homedir.DisableCache = true
+
+	for _, got := range Agents() {
+		provider, ok := Find(Type(got.Type))
+		require.True(t, ok)
+		require.Len(t, got.SessionDirs, len(provider.SessionDirs))
+		for i, raw := range provider.SessionDirs {
+			expected, err := homedir.Expand(raw)
+			require.NoError(t, err)
+			assert.Equal(t, expected, got.SessionDirs[i])
+		}
 	}
 }
 
@@ -91,6 +109,7 @@ func TestProviderJSONFilesAreValid(t *testing.T) {
 			assert.Contains(t, raw, "projectAgentsDir")
 			assert.Contains(t, raw, "userAgentsDir")
 			assert.Contains(t, raw, "detectDir")
+			assert.Contains(t, raw, "sessionDirs")
 		})
 	}
 	_ = os.Getenv // keep os import available for future tests

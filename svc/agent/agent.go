@@ -31,13 +31,14 @@ type Type string
 // Provider is one row of the embedded agent table. Path fields that begin
 // with "~/" are user-relative and must be run through ExpandHome before use.
 type Provider struct {
-	Type             Type   `json:"type"`
-	DisplayName      string `json:"displayName"`
-	ProjectSkillsDir string `json:"projectSkillsDir"`
-	UserSkillsDir    string `json:"userSkillsDir"`
-	ProjectAgentsDir string `json:"projectAgentsDir"`
-	UserAgentsDir    string `json:"userAgentsDir"`
-	DetectDir        string `json:"detectDir"`
+	Type             Type     `json:"type"`
+	DisplayName      string   `json:"displayName"`
+	ProjectSkillsDir string   `json:"projectSkillsDir"`
+	UserSkillsDir    string   `json:"userSkillsDir"`
+	ProjectAgentsDir string   `json:"projectAgentsDir"`
+	UserAgentsDir    string   `json:"userAgentsDir"`
+	DetectDir        string   `json:"detectDir"`
+	SessionDirs      []string `json:"sessionDirs"`
 }
 
 // LoadAll reads every JSON file under providers/ and returns the parsed

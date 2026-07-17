@@ -25,12 +25,13 @@ type AgentType = Type
 // is called), so Apply and Detect never see a tilde.
 type Agent struct {
 	Type             AgentType
-	DisplayName      string // human-readable name for TUI rendering
-	ProjectSkillsDir  string // relative to cwd when not absolute
-	UserSkillsDir    string // absolute
-	ProjectAgentsDir string // relative to cwd when not absolute
-	UserAgentsDir    string // absolute
-	DetectDir        string // if this dir exists on disk, the agent is "installed"
+	DisplayName      string   // human-readable name for TUI rendering
+	ProjectSkillsDir string   // relative to cwd when not absolute
+	UserSkillsDir    string   // absolute
+	ProjectAgentsDir string   // relative to cwd when not absolute
+	UserAgentsDir    string   // absolute
+	DetectDir        string   // if this dir exists on disk, the agent is "installed"
+	SessionDirs      []string // absolute session roots after `~/` expansion
 }
 
 // Agents returns the canonical install-location table, translated from the
@@ -49,14 +50,20 @@ func Agents() []Agent {
 	src := LoadAll()
 	out := make([]Agent, 0, len(src))
 	for _, p := range src {
+		sessionDirs := make([]string, 0, len(p.SessionDirs))
+		for _, dir := range p.SessionDirs {
+			sessionDirs = append(sessionDirs, expand(dir))
+		}
+
 		out = append(out, Agent{
-			Type:              p.Type,
-			DisplayName:       p.DisplayName,
-			ProjectSkillsDir:  p.ProjectSkillsDir,
-			UserSkillsDir:     expand(p.UserSkillsDir),
-			ProjectAgentsDir:  p.ProjectAgentsDir,
-			UserAgentsDir:     expand(p.UserAgentsDir),
-			DetectDir:         expand(p.DetectDir),
+			Type:             p.Type,
+			DisplayName:      p.DisplayName,
+			ProjectSkillsDir: p.ProjectSkillsDir,
+			UserSkillsDir:    expand(p.UserSkillsDir),
+			ProjectAgentsDir: p.ProjectAgentsDir,
+			UserAgentsDir:    expand(p.UserAgentsDir),
+			DetectDir:        expand(p.DetectDir),
+			SessionDirs:      sessionDirs,
 		})
 	}
 	return out

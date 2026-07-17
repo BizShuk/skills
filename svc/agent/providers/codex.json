@@ -5,5 +5,6 @@
   "userSkillsDir": "~/.codex/skills",
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.codex/agents",
-  "detectDir": "~/.codex"
+  "detectDir": "~/.codex",
+  "sessionDirs": ["~/.codex/sessions", "~/.codex/archived_sessions"]
 }

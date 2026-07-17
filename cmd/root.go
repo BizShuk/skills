@@ -11,16 +11,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Execute builds the cobra command tree and runs it with os.Args.
-// Errors from cobra or from any RunE are returned to the caller; the
-// root-level main in this repo prints them and exits non-zero.
-func Execute() error {
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{Use: "skills", SilenceUsage: true}
 
 	root.AddCommand(addCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(removeCmd())
 	root.AddCommand(stats.StatsCmd())
+	root.AddCommand(sessionCmd())
+	return root
+}
 
-	return root.Execute()
+// Execute builds the cobra command tree and runs it with os.Args.
+// Errors from cobra or from any RunE are returned to the caller; the
+// root-level main in this repo prints them and exits non-zero.
+func Execute() error {
+	return newRootCmd().Execute()
 }

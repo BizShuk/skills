@@ -5,5 +5,6 @@
   "userSkillsDir": "~/.hermes/skills",
   "projectAgentsDir": ".hermes/agents",
   "userAgentsDir": "~/.hermes/agents",
-  "detectDir": "~/.hermes"
+  "detectDir": "~/.hermes",
+  "sessionDirs": ["~/.hermes/sessions"]
 }

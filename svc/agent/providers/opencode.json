@@ -5,5 +5,6 @@
   "userSkillsDir": "~/.config/opencode/skills",
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.config/opencode/agents",
-  "detectDir": "~/.config/opencode"
+  "detectDir": "~/.config/opencode",
+  "sessionDirs": ["~/.local/share/opencode/storage"]
 }

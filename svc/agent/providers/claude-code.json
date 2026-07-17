@@ -5,5 +5,6 @@
   "userSkillsDir": "~/.claude/skills",
   "projectAgentsDir": ".claude/agents",
   "userAgentsDir": "~/.claude/agents",
-  "detectDir": "~/.claude"
+  "detectDir": "~/.claude",
+  "sessionDirs": ["~/.claude/projects"]
 }

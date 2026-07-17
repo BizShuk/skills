@@ -1,53 +1,51 @@
-# List Agent Sessions Implementation Plan
+# 列出 Agent Session 實作計畫
 
-> For agentic workers: REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 給代理工作者：必要子技能：使用 `subagent-driven-development`（建議）或 `executing-plans`，逐項實作本計畫。步驟使用核取方塊 (`- [ ]`) 追蹤進度。
 
-Goal: Add `skills session` to list agent sessions whose recorded working directory matches the current folder.
+目標：新增 `skills session`，列出記錄的工作目錄符合目前資料夾的 agent session。
 
-Architecture: Provider JSON files own all session roots through `sessionDirs`. The `svc/session` package discovers and normalizes sessions through small source-specific parsers, while `cmd/session.go` only resolves the current directory and wires Cobra output. The model remains data-only and the formatter writes through an injected `io.Writer`.
+架構：Provider JSON 檔案透過 `sessionDirs` 管理所有 session 根目錄。`svc/session` 套件透過小型、來源專用的 parser 探索並正規化 session；`cmd/session.go` 只負責解析目前目錄並串接 Cobra 輸出。Model 維持純資料結構，formatter 透過注入的 `io.Writer` 寫出內容。
 
-Tech Stack: Go 1.26.3, Cobra 1.10.2, standard-library JSON/JSONL parsing, `filepath`, `text/tabwriter`, and existing `svc/agent` provider embedding.
+技術堆疊：Go 1.26.3、Cobra 1.10.2、標準函式庫 JSON/JSONL parsing、`filepath`、`text/tabwriter`，以及既有的 `svc/agent` provider embedding。
 
-## Global Constraints
+## 全域限制
 
-- Keep all agent-specific session paths in `svc/agent/providers/*.json`; do not add `~/.claude`, `~/.codex`, or other agent home literals to `svc/session`.
-- Use `RunE`, `cmd.OutOrStdout()`, wrapped errors, and no process exits inside library or command packages.
-- Compare normalized absolute paths; only include a session with explicit working-directory evidence matching the current folder.
-- Missing configured roots and unsupported/invalid session records are skipped without aborting other providers.
-- New exported Go types and functions receive doc comments beginning with their names.
-- Follow red-green-refactor: every production behavior is preceded by a failing focused test.
-- Preserve the existing provider ordering and install behavior.
-- Keep user-facing repository documentation in Traditional Chinese with English technical terms in parentheses where appropriate; use backticks instead of bold emphasis.
+- 所有 agent 專用的 session 路徑都放在 `svc/agent/providers/*.json`；不可在 `svc/session` 加入 `~/.claude`、`~/.codex` 或其他 agent home literal。
+- 使用 `RunE`、`cmd.OutOrStdout()` 與 wrapped errors；library 或 command package 內不得直接結束 process。
+- 比較正規化後的絕對路徑；只有具備明確工作目錄證據且符合目前資料夾的 session 才能列出。
+- 缺少設定的根目錄，以及不支援或無效的 session record，應跳過而不讓其他 provider 中止。
+- 新增的 exported Go type 與 function 必須提供以其名稱開頭的 doc comment。
+- 遵循 red-green-refactor：每個 production behavior 都必須先有會失敗的 focused test。
+- 保留既有 provider 順序與安裝行為。
+- 面向使用者的 repository 文件使用繁體中文；適當處搭配英文技術術語（English technical terms），並使用 backtick 而非粗體強調。
 
 ---
 
-### Task 1: Add provider-configured session roots
+### 任務 1：新增由 provider 設定的 session 根目錄
 
-Files:
+檔案：
 
-- Modify: `svc/agent/agent.go`
-- Modify: `svc/agent/agents.go`
-- Modify: `svc/agent/agent_test.go`
-- Modify: `svc/agent/providers/antigravity-cli.json`
-- Modify: `svc/agent/providers/antigravity.json`
-- Modify: `svc/agent/providers/claude-code.json`
-- Modify: `svc/agent/providers/codex.json`
-- Modify: `svc/agent/providers/grok.json`
-- Modify: `svc/agent/providers/hermes-agent.json`
-- Modify: `svc/agent/providers/opencode.json`
-- Modify: `svc/agent/providers/pi.json`
+- 修改：`svc/agent/agent.go`
+- 修改：`svc/agent/agents.go`
+- 修改：`svc/agent/agent_test.go`
+- 修改：`svc/agent/providers/antigravity-cli.json`
+- 修改：`svc/agent/providers/antigravity.json`
+- 修改：`svc/agent/providers/claude-code.json`
+- 修改：`svc/agent/providers/codex.json`
+- 修改：`svc/agent/providers/grok.json`
+- 修改：`svc/agent/providers/hermes-agent.json`
+- 修改：`svc/agent/providers/opencode.json`
+- 修改：`svc/agent/providers/pi.json`
 
-Interfaces:
+介面：
 
-- `agent.Provider.SessionDirs []string` decodes JSON `sessionDirs` values exactly as configured.
-- `agent.Agent.SessionDirs []string` contains the same paths after `~/` expansion.
-- `agent.Agents()` returns a fresh `SessionDirs` slice so callers cannot mutate embedded provider state.
+- `agent.Provider.SessionDirs []string` 依設定內容原樣解碼 JSON `sessionDirs` 值。
+- `agent.Agent.SessionDirs []string` 包含展開 `~/` 後的相同路徑。
+- `agent.Agents()` 回傳新的 `SessionDirs` slice，讓呼叫端無法修改 embedded provider state。
 
-- [ ] Step 1: Write the failing provider schema test.
+- [ ] 步驟 1：撰寫會失敗的 provider schema test。
 
-Extend `TestProviderFieldsRoundTripViaJSON` with the explicit assertion that
-the loaded provider has a non-nil session directory slice, and add a focused
-test for home expansion:
+在 `TestProviderFieldsRoundTripViaJSON` 加入 loaded provider 具有非 nil session directory slice 的明確 assertion，並新增 home expansion 的 focused test：
 
 ```go
 func TestProviderSessionDirsExpandHome(t *testing.T) {
@@ -67,33 +65,33 @@ func TestProviderSessionDirsExpandHome(t *testing.T) {
 }
 ```
 
-Update the JSON validity test with:
+在 JSON validity test 加入：
 
 ```go
 assert.Contains(t, raw, "sessionDirs")
 ```
 
-- [ ] Step 2: Run the focused test and verify it fails because `Provider` and `Agent` do not yet expose `SessionDirs`.
+- [ ] 步驟 2：執行 focused test，確認它因為 `Provider` 與 `Agent` 尚未公開 `SessionDirs` 而失敗。
 
-Run: `go test ./svc/agent -run 'TestProviderSessionDirsExpandHome|TestProviderJSONFilesAreValid' -count=1`
+執行：`go test ./svc/agent -run 'TestProviderSessionDirsExpandHome|TestProviderJSONFilesAreValid' -count=1`
 
-Expected: `FAIL` with an undefined `SessionDirs` field or missing `sessionDirs` JSON key.
+預期：因為 `SessionDirs` field 未定義或缺少 `sessionDirs` JSON key 而得到 `FAIL`。
 
-- [ ] Step 3: Add the provider and translated-agent fields.
+- [ ] 步驟 3：新增 provider 與 translated-agent fields。
 
-Add the field to `Provider`:
+在 `Provider` 新增欄位：
 
 ```go
 SessionDirs []string `json:"sessionDirs"`
 ```
 
-Add the field to `Agent`:
+在 `Agent` 新增欄位：
 
 ```go
 SessionDirs []string // absolute session roots after `~/` expansion
 ```
 
-In `Agents()`, expand each provider root into a fresh slice:
+在 `Agents()` 中，將每個 provider root 展開到新的 slice：
 
 ```go
 sessionDirs := make([]string, 0, len(p.SessionDirs))
@@ -113,7 +111,7 @@ out = append(out, Agent{
 })
 ```
 
-Add these JSON values:
+加入以下 JSON values：
 
 ```json
 "sessionDirs": ["~/.gemini/antigravity-cli/brain"]
@@ -126,32 +124,32 @@ Add these JSON values:
 "sessionDirs": ["~/.pi/agent/sessions"]
 ```
 
-- [ ] Step 4: Run the focused provider tests and verify they pass.
+- [ ] 步驟 4：執行 focused provider tests，確認它們通過。
 
-Run: `go test ./svc/agent -run 'TestProviderSessionDirsExpandHome|TestProviderJSONFilesAreValid|TestProviderFieldsRoundTripViaJSON' -count=1`
+執行：`go test ./svc/agent -run 'TestProviderSessionDirsExpandHome|TestProviderJSONFilesAreValid|TestProviderFieldsRoundTripViaJSON' -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-- [ ] Step 5: Run `gofmt` on changed Go files and inspect the diff.
+- [ ] 步驟 5：對變更的 Go files 執行 `gofmt`，並檢查 diff。
 
-Run: `gofmt -w svc/agent/agent.go svc/agent/agents.go svc/agent/agent_test.go && git diff --check`
+執行：`gofmt -w svc/agent/agent.go svc/agent/agents.go svc/agent/agent_test.go && git diff --check`
 
-Expected: no whitespace errors.
+預期：沒有 whitespace errors。
 
-### Task 2: Add the session value model
+### 任務 2：新增 session value model
 
-Files:
+檔案：
 
-- Create: `model/session.go`
-- Create: `model/session_test.go`
+- 建立：`model/session.go`
+- 建立：`model/session_test.go`
 
-Interfaces:
+介面：
 
-- `model.AgentSession` stores `Agent`, `ID`, `StartedAt`, `LastActivity`, and `Path`.
+- `model.AgentSession` 儲存 `Agent`、`ID`、`StartedAt`、`LastActivity` 與 `Path`。
 
-- [ ] Step 1: Write the failing model test.
+- [ ] 步驟 1：撰寫會失敗的 model test。
 
-Create `model/session_test.go`:
+建立 `model/session_test.go`：
 
 ```go
 package model
@@ -183,15 +181,15 @@ func TestAgentSessionStoresListingMetadata(t *testing.T) {
 }
 ```
 
-- [ ] Step 2: Run the model test and verify it fails because `AgentSession` is undefined.
+- [ ] 步驟 2：執行 model test，確認它因為 `AgentSession` 未定義而失敗。
 
-Run: `go test ./model -run TestAgentSessionStoresListingMetadata -count=1`
+執行：`go test ./model -run TestAgentSessionStoresListingMetadata -count=1`
 
-Expected: `FAIL` with `undefined: AgentSession`.
+預期：得到 `undefined: AgentSession` 的 `FAIL`。
 
-- [ ] Step 3: Add the data-only model.
+- [ ] 步驟 3：新增純資料 model。
 
-Create `model/session.go`:
+建立 `model/session.go`：
 
 ```go
 package model
@@ -208,30 +206,30 @@ type AgentSession struct {
 }
 ```
 
-- [ ] Step 4: Run the model test and verify it passes.
+- [ ] 步驟 4：執行 model test，確認它通過。
 
-Run: `go test ./model -run TestAgentSessionStoresListingMetadata -count=1`
+執行：`go test ./model -run TestAgentSessionStoresListingMetadata -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-### Task 3: Implement common path, timestamp, and JSON metadata helpers
+### 任務 3：實作共用的路徑、時間戳記與 JSON metadata helpers
 
-Files:
+檔案：
 
-- Create: `svc/session/helpers.go`
-- Create: `svc/session/helpers_test.go`
+- 建立：`svc/session/helpers.go`
+- 建立：`svc/session/helpers_test.go`
 
-Interfaces:
+介面：
 
-- `normalizePath(path string) (string, error)` returns a cleaned absolute path and resolves symlinks when possible.
-- `samePath(left, right string) bool` compares normalized paths.
-- `parseTimestamp(value any) (time.Time, bool)` accepts RFC3339/RFC3339Nano strings and Unix seconds or milliseconds.
-- `workingDirectories(value any) []string` recursively extracts values whose keys are `cwd`, `Cwd`, `working_directory`, `workdir`, or `workingDirectory`.
-- `sessionMetadata` accumulates ID, matching cwd evidence, earliest timestamp, and latest timestamp while a file is scanned.
+- `normalizePath(path string) (string, error)` 回傳清理後的絕對路徑，並在可能時解析 symlink。
+- `samePath(left, right string) bool` 比較正規化後的路徑。
+- `parseTimestamp(value any) (time.Time, bool)` 接受 RFC3339/RFC3339Nano 字串，以及 Unix seconds 或 milliseconds。
+- `workingDirectories(value any) []string` 遞迴擷取 key 為 `cwd`、`Cwd`、`working_directory`、`workdir` 或 `workingDirectory` 的 values。
+- `sessionMetadata` 在掃描檔案時累積 ID、符合 cwd 的證據、最早 timestamp 與最新 timestamp。
 
-- [ ] Step 1: Write failing helper tests covering path normalization, timestamp formats, nested cwd fields, and invalid input.
+- [ ] 步驟 1：撰寫會失敗的 helper tests，涵蓋 path normalization、timestamp formats、nested cwd fields 與 invalid input。
 
-Create `svc/session/helpers_test.go` with these cases:
+建立 `svc/session/helpers_test.go`，包含以下案例：
 
 ```go
 func writeJSONL(t *testing.T, path string, lines ...string) {
@@ -273,21 +271,17 @@ func TestWorkingDirectoriesFindsNestedSupportedKeys(t *testing.T) {
 }
 ```
 
-- [ ] Step 2: Run the helper tests and verify the expected failures.
+- [ ] 步驟 2：執行 helper tests，確認符合預期的失敗。
 
-Run: `go test ./svc/session -run 'TestSamePath|TestParseTimestamp|TestWorkingDirectories' -count=1`
+執行：`go test ./svc/session -run 'TestSamePath|TestParseTimestamp|TestWorkingDirectories' -count=1`
 
-Expected: `FAIL` because the package and helper functions do not exist.
+預期：因為 package 與 helper functions 尚不存在而得到 `FAIL`。
 
-- [ ] Step 3: Implement the helpers with standard-library types only.
+- [ ] 步驟 3：只使用 standard-library types 實作 helpers。
 
-Use `filepath.Abs`, `filepath.Clean`, and `filepath.EvalSymlinks` with an
-absolute-path fallback. Treat numeric timestamps above `1e12` as milliseconds
-and smaller values as seconds. Recursively walk only JSON objects and arrays
-when collecting supported working-directory keys; do not inspect arbitrary
-string values or prompt content.
+使用 `filepath.Abs`、`filepath.Clean` 與 `filepath.EvalSymlinks`，並提供 absolute-path fallback。將大於 `1e12` 的 numeric timestamps 視為 milliseconds，較小值視為 seconds。收集支援的 working-directory keys 時，只遞迴走訪 JSON objects 與 arrays；不要檢查任意 string values 或 prompt content。
 
-The metadata accumulator must expose these operations to source parsers:
+metadata accumulator 必須向 source parsers 提供以下 operations：
 
 ```go
 type sessionMetadata struct {
@@ -303,32 +297,30 @@ func (m *sessionMetadata) addTimestamp(value any)
 func (m sessionMetadata) session(agentName, path, fallbackID string) (model.AgentSession, bool)
 ```
 
-- [ ] Step 4: Run the helper tests and verify they pass.
+- [ ] 步驟 4：執行 helper tests，確認它們通過。
 
-Run: `go test ./svc/session -run 'TestSamePath|TestParseTimestamp|TestWorkingDirectories' -count=1`
+執行：`go test ./svc/session -run 'TestSamePath|TestParseTimestamp|TestWorkingDirectories' -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-### Task 4: Add Claude and Codex session discoverers
+### 任務 4：新增 Claude 與 Codex session discoverers
 
-Files:
+檔案：
 
-- Create: `svc/session/claude.go`
-- Create: `svc/session/codex.go`
-- Create: `svc/session/claude_test.go`
-- Create: `svc/session/codex_test.go`
+- 建立：`svc/session/claude.go`
+- 建立：`svc/session/codex.go`
+- 建立：`svc/session/claude_test.go`
+- 建立：`svc/session/codex_test.go`
 
-Interfaces:
+介面：
 
-- `discoverClaude(root, cwd string) ([]model.AgentSession, error)` scans all `.jsonl` files recursively, including `subagents/` files.
-- `discoverCodex(root, cwd string) ([]model.AgentSession, error)` scans all `.jsonl` files recursively and uses `session_meta.payload` metadata.
-- Both functions silently return an empty slice for a missing root and skip malformed lines or files with no matching cwd evidence.
+- `discoverClaude(root, cwd string) ([]model.AgentSession, error)` 遞迴掃描所有 `.jsonl` files，包含 `subagents/` files。
+- `discoverCodex(root, cwd string) ([]model.AgentSession, error)` 遞迴掃描所有 `.jsonl` files，並使用 `session_meta.payload` metadata。
+- 兩個 functions 遇到 missing root 時都靜默回傳 empty slice，並跳過 malformed lines 或沒有 matching cwd evidence 的 files。
 
 - [ ] Step 1: Write the failing Claude fixture test.
 
-The fixture must include one matching session, one different cwd, a malformed
-line, and a nested subagent file. Assert that only the matching parent and
-subagent sessions are returned, with earliest/latest timestamps.
+fixture 必須包含一個 matching session、一個不同 cwd、一行 malformed line，以及一個 nested subagent file。Assert 只回傳 matching parent 與 subagent sessions，並包含 earliest/latest timestamps。
 
 ```go
 func TestDiscoverClaudeFiltersByCWDAndIncludesSubagents(t *testing.T) {
@@ -363,32 +355,25 @@ func TestDiscoverClaudeFiltersByCWDAndIncludesSubagents(t *testing.T) {
 }
 ```
 
-- [ ] Step 2: Run the Claude test and verify it fails because `discoverClaude` is undefined.
+- [ ] 步驟 2：執行 Claude test，確認它因為 `discoverClaude` 未定義而失敗。
 
-Run: `go test ./svc/session -run TestDiscoverClaudeFiltersByCWDAndIncludesSubagents -count=1`
+執行：`go test ./svc/session -run TestDiscoverClaudeFiltersByCWDAndIncludesSubagents -count=1`
 
-Expected: `FAIL` with `undefined: discoverClaude`.
+預期：得到 `undefined: discoverClaude` 的 `FAIL`。
 
 - [ ] Step 3: Implement Claude discovery.
 
-Walk `root` using `filepath.WalkDir`. For every regular `.jsonl` file, scan
-each line with a scanner buffer of at least 10 MiB, unmarshal into
-`map[string]any`, add `sessionId`, `cwd`, and `timestamp` to metadata, then
-emit one `model.AgentSession` only when the metadata has a non-empty ID and
-`MatchesCWD` is true. Use the absolute file path in `Path` and `claude-code`
-in `Agent`.
+使用 `filepath.WalkDir` 走訪 `root`。對每個 regular `.jsonl` file，以至少 10 MiB 的 scanner buffer 掃描每一行，unmarshal 成 `map[string]any`，將 `sessionId`、`cwd` 與 `timestamp` 加入 metadata；只有 metadata 具有非空 ID 且 `MatchesCWD` 為 true 時，才 emit 一個 `model.AgentSession`。`Path` 使用絕對檔案路徑，`Agent` 使用 `claude-code`。
 
 - [ ] Step 4: Run the Claude test and verify it passes.
 
-Run: `go test ./svc/session -run TestDiscoverClaudeFiltersByCWDAndIncludesSubagents -count=1`
+執行：`go test ./svc/session -run TestDiscoverClaudeFiltersByCWDAndIncludesSubagents -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-- [ ] Step 5: Write the failing Codex fixture test.
+- [ ] 步驟 5：撰寫會失敗的 Codex fixture test。
 
-Create a normal session file and an archived session file with
-`session_meta.payload.cwd` set to the target. Add a different-cwd session and
-assert both matching roots are returned, while malformed lines are ignored.
+建立一般 session file 與 archived session file，將 `session_meta.payload.cwd` 設為 target。加入不同 cwd 的 session，assert 兩個 matching roots 都會回傳，並忽略 malformed lines。
 
 ```go
 func TestDiscoverCodexScansArchivedRootAndUsesSessionMeta(t *testing.T) {
@@ -415,44 +400,37 @@ func TestDiscoverCodexScansArchivedRootAndUsesSessionMeta(t *testing.T) {
 }
 ```
 
-- [ ] Step 6: Run the Codex test and verify it fails.
+- [ ] 步驟 6：執行 Codex test，確認它失敗。
 
-Run: `go test ./svc/session -run TestDiscoverCodexScansArchivedRootAndUsesSessionMeta -count=1`
+執行：`go test ./svc/session -run TestDiscoverCodexScansArchivedRootAndUsesSessionMeta -count=1`
 
-Expected: `FAIL` because `discoverCodex` is undefined.
+預期：因為 `discoverCodex` 未定義而得到 `FAIL`。
 
-- [ ] Step 7: Implement Codex discovery and verify it passes.
+- [ ] 步驟 7：實作 Codex discovery，確認它通過。
 
-Use the same JSONL walker as Claude, but read `payload.id` and
-`payload.cwd` only from records with `type == "session_meta"`. Timestamps may
-come from any valid record in the file. Use the filename without `.jsonl` as
-the fallback ID and `codex` as the agent value.
+使用與 Claude 相同的 JSONL walker，但只從 `type == "session_meta"` 的 records 讀取 `payload.id` 與 `payload.cwd`。Timestamps 可以來自檔案中的任何 valid record。使用去除 `.jsonl` 的 filename 作為 fallback ID，並使用 `codex` 作為 agent value。
 
-Run: `go test ./svc/session -run TestDiscoverCodexScansArchivedRootAndUsesSessionMeta -count=1`
+執行：`go test ./svc/session -run TestDiscoverCodexScansArchivedRootAndUsesSessionMeta -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-### Task 5: Add Grok and structured-metadata discoverers
+### 任務 5：新增 Grok 與 structured-metadata discoverers
 
-Files:
+檔案：
 
-- Create: `svc/session/grok.go`
-- Create: `svc/session/structured.go`
-- Create: `svc/session/grok_test.go`
-- Create: `svc/session/structured_test.go`
+- 建立：`svc/session/grok.go`
+- 建立：`svc/session/structured.go`
+- 建立：`svc/session/grok_test.go`
+- 建立：`svc/session/structured_test.go`
 
-Interfaces:
+介面：
 
-- `discoverGrok(root, cwd string) ([]model.AgentSession, error)` handles URL-escaped project directory names and child session directories.
-- `discoverStructured(root, cwd, agentName string) ([]model.AgentSession, error)` handles transcript/session files for Antigravity, Hermes, OpenCode, and Pi when structured cwd metadata is present.
+- `discoverGrok(root, cwd string) ([]model.AgentSession, error)` 處理 URL-escaped project directory names 與 child session directories。
+- `discoverStructured(root, cwd, agentName string) ([]model.AgentSession, error)` 在存在 structured cwd metadata 時，處理 Antigravity、Hermes、OpenCode 與 Pi 的 transcript/session files。
 
 - [ ] Step 1: Write the failing Grok fixture test.
 
-Create a project directory named with `url.PathEscape(cwd)` and two child
-session directories. Put `working_directory`, `created_at`, and `updated_at`
-values in `prompt_context.json` and `summary.json`. Add a second project root
-and assert only the target project is returned in descending last-activity
-order:
+建立一個以 `url.PathEscape(cwd)` 命名的 project directory，以及兩個 child session directories。在 `prompt_context.json` 與 `summary.json` 放入 `working_directory`、`created_at` 與 `updated_at` values。加入第二個 project root，並 assert 只有 target project 會依 descending last-activity order 回傳：
 
 ```go
 func TestDiscoverGrokFiltersEscapedProjectRoot(t *testing.T) {
@@ -487,29 +465,23 @@ func TestDiscoverGrokFiltersEscapedProjectRoot(t *testing.T) {
 }
 ```
 
-- [ ] Step 2: Run the Grok test and verify it fails because `discoverGrok` is undefined.
+- [ ] 步驟 2：執行 Grok test，確認它因為 `discoverGrok` 未定義而失敗。
 
-Run: `go test ./svc/session -run TestDiscoverGrokFiltersEscapedProjectRoot -count=1`
+執行：`go test ./svc/session -run TestDiscoverGrokFiltersEscapedProjectRoot -count=1`
 
-Expected: `FAIL`.
+預期：`FAIL`。
 
-- [ ] Step 3: Implement Grok discovery and verify it passes.
+- [ ] 步驟 3：實作 Grok discovery，確認它通過。
 
-Decode each first-level project directory with `url.PathUnescape`, compare it
-with the normalized cwd, and scan each child directory's JSON metadata. Use
-the child directory name as the session ID. Set `Path` to the session
-directory. Accept `prompt_context.working_directory` only when it matches the
-target cwd.
+使用 `url.PathUnescape` decode 每個 first-level project directory，與 normalized cwd 比較，並掃描每個 child directory 的 JSON metadata。使用 child directory name 作為 session ID。將 `Path` 設為 session directory。只有 `prompt_context.working_directory` 符合 target cwd 時才接受。
 
-Run: `go test ./svc/session -run TestDiscoverGrokFiltersEscapedProjectRoot -count=1`
+執行：`go test ./svc/session -run TestDiscoverGrokFiltersEscapedProjectRoot -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-- [ ] Step 4: Write the failing structured-metadata test.
+- [ ] 步驟 4：撰寫會失敗的 structured-metadata test。
 
-Create a transcript fixture with nested `tool_calls[].args.Cwd`, timestamps,
-and an ID inferred from its enclosing directory. Add another fixture where the
-cwd appears only in arbitrary prompt text; assert that the latter is ignored.
+建立包含 nested `tool_calls[].args.Cwd`、timestamps，以及從 enclosing directory 推導 ID 的 transcript fixture。再加入一個 cwd 只出現在任意 prompt text 的 fixture，assert 後者會被忽略。
 
 ```go
 func TestDiscoverStructuredUsesExplicitCwdKeysOnly(t *testing.T) {
@@ -529,45 +501,37 @@ func TestDiscoverStructuredUsesExplicitCwdKeysOnly(t *testing.T) {
 }
 ```
 
-- [ ] Step 5: Run the structured test and verify it fails.
+- [ ] 步驟 5：執行 structured test，確認它失敗。
 
-Run: `go test ./svc/session -run TestDiscoverStructuredUsesExplicitCwdKeysOnly -count=1`
+執行：`go test ./svc/session -run TestDiscoverStructuredUsesExplicitCwdKeysOnly -count=1`
 
-Expected: `FAIL` because `discoverStructured` is undefined.
+預期：因為 `discoverStructured` 未定義而得到 `FAIL`。
 
-- [ ] Step 6: Implement structured discovery and verify it passes.
+- [ ] 步驟 6：實作 structured discovery，確認它通過。
 
-Walk configured roots. Group records by the nearest session directory: for a
-transcript under `.system_generated/logs`, use the brain directory; otherwise
-use the file path as the session path. Parse JSON objects recursively through
-the helper's supported key names, collect timestamps, and emit only groups
-with explicit matching cwd evidence and a stable ID. Ignore arbitrary string
-content and malformed lines.
+走訪設定的 roots。依最近的 session directory 分組 records：對於 `.system_generated/logs` 下的 transcript，使用 brain directory；否則使用 file path 作為 session path。依 helper 支援的 key names 遞迴 parse JSON objects，收集 timestamps，只 emit 具有明確 matching cwd evidence 與 stable ID 的 groups。忽略任意 string content 與 malformed lines。
 
-Run: `go test ./svc/session -run TestDiscoverStructuredUsesExplicitCwdKeysOnly -count=1`
+執行：`go test ./svc/session -run TestDiscoverStructuredUsesExplicitCwdKeysOnly -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-### Task 6: Add service aggregation, sorting, and output formatting
+### 任務 6：新增 service aggregation、sorting 與 output formatting
 
-Files:
+檔案：
 
-- Create: `svc/session/service.go`
-- Create: `svc/session/format.go`
-- Create: `svc/session/service_test.go`
-- Create: `svc/session/format_test.go`
+- 建立：`svc/session/service.go`
+- 建立：`svc/session/format.go`
+- 建立：`svc/session/service_test.go`
+- 建立：`svc/session/format_test.go`
 
-Interfaces:
+介面：
 
-- `List(cwd string) ([]model.AgentSession, error)` loads expanded provider session roots and dispatches to source discoverers.
-- `Format(w io.Writer, cwd string, sessions []model.AgentSession) error` renders the stable table or empty-result message.
+- `List(cwd string) ([]model.AgentSession, error)` 載入展開後的 provider session roots，並 dispatch 到 source discoverers。
+- `Format(w io.Writer, cwd string, sessions []model.AgentSession) error` render stable table 或 empty-result message。
 
 - [ ] Step 1: Write failing tests for aggregation and stable sorting.
 
-Use temporary `$HOME` roots containing a Claude fixture and a Codex fixture,
-call `List` with the current test directory, and assert results are sorted by
-last activity descending, then agent and ID. Add a test that missing roots do
-not return an error.
+使用包含 Claude fixture 與 Codex fixture 的 temporary `$HOME` roots，以目前 test directory 呼叫 `List`，並 assert results 依 last activity descending、接著 agent 與 ID 排序。加入 missing roots 不回傳 error 的 test。
 
 ```go
 func TestListSortsByLastActivityThenAgentAndID(t *testing.T) {
@@ -603,19 +567,15 @@ func TestListSortsByLastActivityThenAgentAndID(t *testing.T) {
 }
 ```
 
-- [ ] Step 2: Run the service test and verify it fails because `List` is undefined.
+- [ ] 步驟 2：執行 service test，確認它因為 `List` 未定義而失敗。
 
-Run: `go test ./svc/session -run TestListSortsByLastActivityThenAgentAndID -count=1`
+執行：`go test ./svc/session -run TestListSortsByLastActivityThenAgentAndID -count=1`
 
-Expected: `FAIL`.
+預期：`FAIL`。
 
-- [ ] Step 3: Implement `List`.
+- [ ] 步驟 3：實作 `List`。
 
-Use `agent.Agents()` and each `Agent.SessionDirs`. Dispatch known types to
-`discoverClaude`, `discoverCodex`, `discoverGrok`, or
-`discoverStructured`. Skip empty roots and providers without a discoverer.
-Deduplicate by `(agent, ID)`; when duplicate records exist, retain the entry
-with the newer `LastActivity`. Sort with:
+使用 `agent.Agents()` 與每個 `Agent.SessionDirs`。將已知 types dispatch 到 `discoverClaude`、`discoverCodex`、`discoverGrok` 或 `discoverStructured`。跳過 empty roots 與沒有 discoverer 的 providers。依 `(agent, ID)` 去重；出現 duplicate records 時，保留 `LastActivity` 較新的 entry。使用以下方式排序：
 
 ```go
 sort.Slice(sessions, func(i, j int) bool {
@@ -631,14 +591,13 @@ sort.Slice(sessions, func(i, j int) bool {
 
 - [ ] Step 4: Run the service test and verify it passes.
 
-Run: `go test ./svc/session -run TestListSortsByLastActivityThenAgentAndID -count=1`
+執行：`go test ./svc/session -run TestListSortsByLastActivityThenAgentAndID -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-- [ ] Step 5: Write failing formatter tests.
+- [ ] 步驟 5：撰寫會失敗的 formatter tests。
 
-Assert the header, both session rows, local timestamp layout, source paths,
-and empty-result message. Use a `bytes.Buffer` as the writer.
+Assert header、兩個 session rows、local timestamp layout、source paths 與 empty-result message。使用 `bytes.Buffer` 作為 writer。
 
 ```go
 func TestFormatEmptyResult(t *testing.T) {
@@ -649,41 +608,38 @@ func TestFormatEmptyResult(t *testing.T) {
 }
 ```
 
-- [ ] Step 6: Run formatter tests and verify they fail because `Format` is undefined.
+- [ ] 步驟 6：執行 formatter tests，確認它們因為 `Format` 未定義而失敗。
 
-Run: `go test ./svc/session -run TestFormat -count=1`
+執行：`go test ./svc/session -run TestFormat -count=1`
 
-Expected: `FAIL`.
+預期：`FAIL`。
 
-- [ ] Step 7: Implement and verify `Format`.
+- [ ] 步驟 7：實作並驗證 `Format`。
 
-Use `text/tabwriter` with columns `AGENT`, `SESSION ID`, `STARTED`, `LAST ACTIVITY`,
-and `PATH`. Render zero timestamps as `-`; otherwise use the local timezone and
-layout `2006-01-02 15:04:05`. Check errors from `fmt.Fprintln` and
-`tabwriter.Flush`.
+使用 `text/tabwriter`，欄位為 `AGENT`、`SESSION ID`、`STARTED`、`LAST ACTIVITY` 與 `PATH`。將 zero timestamps render 為 `-`；否則使用 local timezone 與 layout `2006-01-02 15:04:05`。檢查 `fmt.Fprintln` 與 `tabwriter.Flush` 的 errors。
 
-Run: `go test ./svc/session -run TestFormat -count=1`
+執行：`go test ./svc/session -run TestFormat -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-### Task 7: Wire the Cobra command and synchronize documentation
+### 任務 7：串接 Cobra command 並同步文件
 
-Files:
+檔案：
 
-- Create: `cmd/session.go`
-- Modify: `cmd/root.go`
-- Create: `cmd/root_test.go`
-- Modify: `README.md`
-- Modify: `CLAUDE.md`
+- 建立：`cmd/session.go`
+- 修改：`cmd/root.go`
+- 建立：`cmd/root_test.go`
+- 修改：`README.md`
+- 修改：`CLAUDE.md`
 
-Interfaces:
+介面：
 
-- `sessionCmd() *cobra.Command` registers `Use: "session"`, `cobra.NoArgs`, and a `RunE` handler.
-- `newRootCmd() *cobra.Command` returns the command tree; `Execute()` uses it so registration can be tested without process exit.
+- `sessionCmd() *cobra.Command` 註冊 `Use: "session"`、`cobra.NoArgs` 與 `RunE` handler。
+- `newRootCmd() *cobra.Command` 回傳 command tree；`Execute()` 使用它，讓 registration 可以在不結束 process 的情況下測試。
 
-- [ ] Step 1: Write the failing command registration test.
+- [ ] 步驟 1：撰寫會失敗的 command registration test。
 
-Create `cmd/root_test.go`:
+建立 `cmd/root_test.go`：
 
 ```go
 package cmd
@@ -705,15 +661,15 @@ func TestRootRegistersSessionCommand(t *testing.T) {
 }
 ```
 
-- [ ] Step 2: Run the command test and verify it fails because `newRootCmd` and the `session` command do not exist.
+- [ ] 步驟 2：執行 command test，確認它因為 `newRootCmd` 與 `session` command 不存在而失敗。
 
-Run: `go test ./cmd -run TestRootRegistersSessionCommand -count=1`
+執行：`go test ./cmd -run TestRootRegistersSessionCommand -count=1`
 
-Expected: `FAIL`.
+預期：`FAIL`。
 
-- [ ] Step 3: Implement command wiring.
+- [ ] 步驟 3：實作 command wiring。
 
-Create `cmd/session.go`:
+建立 `cmd/session.go`：
 
 ```go
 package cmd
@@ -746,7 +702,7 @@ func sessionCmd() *cobra.Command {
 }
 ```
 
-Refactor `cmd/root.go` so command construction is testable:
+重構 `cmd/root.go`，讓 command construction 可測試：
 
 ```go
 func newRootCmd() *cobra.Command {
@@ -764,15 +720,15 @@ func Execute() error {
 }
 ```
 
-- [ ] Step 4: Run the command test and verify it passes.
+- [ ] 步驟 4：執行 command test，確認它通過。
 
-Run: `go test ./cmd -run TestRootRegistersSessionCommand -count=1`
+執行：`go test ./cmd -run TestRootRegistersSessionCommand -count=1`
 
-Expected: `PASS`.
+預期：`PASS`。
 
-- [ ] Step 5: Add concise `README.md` and `CLAUDE.md` documentation.
+- [ ] 步驟 5：在 `README.md` 與 `CLAUDE.md` 新增簡潔文件。
 
-Document:
+文件內容：
 
 ```markdown
 ## `skills session`
@@ -787,56 +743,52 @@ skills session
 metadata 明確指向目前工作目錄的項目；缺少 session 目錄時會顯示空結果。
 ```
 
-Add `session` to the command overview and add its focused test command to
-`CLAUDE.md` without changing existing build conventions.
+在 command overview 加入 `session`，並在 `CLAUDE.md` 加入其 focused test command；不要改變既有 build conventions。
 
-- [ ] Step 6: Run Markdown and diff checks.
+- [ ] 步驟 6：執行 Markdown 與 diff checks。
 
-Run: `git diff --check`
+執行：`git diff --check`
 
-Expected: no whitespace errors.
+預期：沒有 whitespace errors。
 
-### Task 8: Full verification and live command smoke test
+### 任務 8：完整驗證與 live command smoke test
 
-Files:
+檔案：
 
-- Verify: all changed files from Tasks 1–7
+- 驗證：任務 1–7 的所有變更檔案
 
-- [ ] Step 1: Run focused package tests.
+- [ ] 步驟 1：執行 focused package tests。
 
-Run: `go test ./svc/agent ./model ./svc/session ./cmd -count=1`
+執行：`go test ./svc/agent ./model ./svc/session ./cmd -count=1`
 
-Expected: all listed packages pass.
+預期：所有列出的 packages 都通過。
 
-- [ ] Step 2: Run the complete test suite.
+- [ ] 步驟 2：執行完整 test suite。
 
-Run: `go test ./... -count=1`
+執行：`go test ./... -count=1`
 
-Expected: exit code `0` with no failing packages.
+預期：exit code 為 `0`，且沒有 failing packages。
 
-- [ ] Step 3: Run static analysis.
+- [ ] 步驟 3：執行 static analysis。
 
-Run: `go vet ./...`
+執行：`go vet ./...`
 
-Expected: exit code `0` and no diagnostics.
+預期：exit code 為 `0` 且沒有 diagnostics。
 
-- [ ] Step 4: Build the CLI to an external output path.
+- [ ] 步驟 4：將 CLI build 到 external output path。
 
-Run: `go build -o /tmp/skills-session .`
+執行：`go build -o /tmp/skills-session .`
 
-Expected: exit code `0`; no repository `bin/` changes.
+預期：exit code 為 `0`；repository `bin/` 不變更。
 
-- [ ] Step 5: Run the live command from the current repository.
+- [ ] 步驟 5：從目前 repository 執行 live command。
 
-Run: `/tmp/skills-session session`
+執行：`/tmp/skills-session session`
 
-Expected: a table or the exact empty-result message, with no panic and no
-hard-coded path error. The command may legitimately list sessions from the
-current folder's Claude, Codex, or Grok roots.
+預期：輸出 table 或 exact empty-result message，不得 panic，也不得出現 hard-coded path error。命令可能合理地列出目前資料夾之 Claude、Codex 或 Grok roots 中的 sessions。
 
-- [ ] Step 6: Verify final diff and repository state.
+- [ ] 步驟 6：驗證 final diff 與 repository state。
 
-Run: `git diff --check && git status --short && git diff --stat`
+執行：`git diff --check && git status --short && git diff --stat`
 
-Expected: no whitespace errors, only the intended implementation/docs files,
-and no generated binaries or temporary fixtures tracked by Git.
+預期：沒有 whitespace errors，只有預期的 implementation/docs files，且 Git 沒有追蹤 generated binaries 或 temporary fixtures。

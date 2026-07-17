@@ -1,8 +1,8 @@
-# `skills add` (Go 版) 使用文件
+# `skills` (Go 版) 使用文件
 
 ## 簡介 (Intro)
 
-本文件說明 `golang` 分支上的 `skills add` 命令列工具，這是以 Go 重寫 `skills add [path]` 後的版本，位於 module `github.com/bizshuk/skills`，原始入口為 `cmd/skills/main.go`。重寫後的 CLI 在功能上對應原本 TypeScript 版的 `skills add`：解析來源、走訪遞迴 plugin、以 bubbletea TUI 讓使用者挑選要安裝的 skills 與目標 agents，最後把選定的 skill 與 subagent 目錄複製到對應的安裝目錄。整體架構採單一職責分層，相關原始碼位於 `svc/source/`、`svc/manifest/`、`svc/fetch/`、`svc/discover/`、`svc/install/`、`svc/tui/`。
+本文件說明 `golang` 分支上的 `skills` 命令列工具，這是以 Go 重寫 `skills add [path]` 後的版本，位於 module `github.com/bizshuk/skills`，原始入口為 `cmd/skills/main.go`。CLI 提供 skill 安裝、移除與 agent session 查詢：解析來源、走訪遞迴 plugin、以 bubbletea TUI 讓使用者挑選要安裝的 skills 與目標 agents，最後把選定的 skill 與 subagent 目錄複製到對應的安裝目錄。整體架構採單一職責分層，相關原始碼位於 `svc/source/`、`svc/manifest/`、`svc/fetch/`、`svc/discover/`、`svc/install/`、`svc/tui/`。
 
 ## Build
 
@@ -35,6 +35,17 @@ skills add https://example.com/team
 skills add ./local/plugins
 skills add owner/repo#v2
 ```
+
+## `skills session`
+
+列出目前資料夾中各 agent 的 session：
+
+```bash
+skills session
+```
+
+命令會讀取 `svc/agent/providers/` 的 `sessionDirs`，只列出 session
+metadata 明確指向目前工作目錄的項目；缺少 session 目錄時會顯示空結果。
 
 ## Flags
 

@@ -5,5 +5,6 @@
   "userSkillsDir": "~/.gemini/antigravity/skills",
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.gemini/antigravity/agents",
-  "detectDir": "~/.gemini/antigravity"
+  "detectDir": "~/.gemini/antigravity",
+  "sessionDirs": ["~/.gemini/antigravity-ide/brain"]
 }
