@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -55,6 +57,29 @@ func TestNewSessionModelWithNoSessionsHasNoAgentTabs(t *testing.T) {
 	assert.Empty(t, m.agentNames())
 	assert.Empty(t, m.items)
 	assert.Equal(t, -1, m.activeAgent)
+}
+
+func TestSessionModelRendersAgentTabsAndDateBeforeSessionID(t *testing.T) {
+	lastActivity := time.Date(2026, time.July, 18, 9, 30, 0, 0, time.FixedZone("SGT", 8*60*60))
+	items := []model.AgentSession{
+		{Agent: "codex", ID: "codex-1", LastActivity: lastActivity},
+		{Agent: "claude-code", ID: "claude-1"},
+	}
+	m := NewSessionModel(items, nil)
+
+	view := m.View()
+	assert.Contains(t, view, "codex 1")
+	assert.Contains(t, view, "claude-code 1")
+
+	row := formatSessionRow(items[0])
+	assert.Less(t, strings.Index(row, "2026-07-18"), strings.Index(row, "codex-1"))
+}
+
+func TestSessionAgentAccentUsesStableAndFallbackColors(t *testing.T) {
+	assert.Equal(t, "39", string(sessionAgentAccent("codex")))
+	assert.Equal(t, "81", string(sessionAgentAccent("unknown-agent")))
+	assert.Contains(t, renderSessionTab("codex", 2, true), "codex 2")
+	assert.Contains(t, renderSessionTab("codex", 2, false), "codex 2")
 }
 
 func sessionIDs(items []model.AgentSession) []string {

@@ -5,15 +5,29 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/bizshuk/skills/model"
 	"github.com/bizshuk/skills/svc/session"
 )
 
 const (
-	sessionListFirstRow    = 4
+	sessionListFirstRow    = 5
 	defaultSessionViewport = 20
 )
+
+var sessionAgentColors = map[string]lipgloss.Color{
+	"claude-code":     lipgloss.Color("135"),
+	"codex":           lipgloss.Color("39"),
+	"grok":            lipgloss.Color("214"),
+	"antigravity":     lipgloss.Color("42"),
+	"antigravity-cli": lipgloss.Color("37"),
+	"hermes-agent":    lipgloss.Color("33"),
+	"opencode":        lipgloss.Color("205"),
+	"pi":              lipgloss.Color("141"),
+}
+
+const sessionFallbackColor = lipgloss.Color("81")
 
 type sessionPhase int
 
@@ -373,8 +387,10 @@ func (m SessionModel) View() string {
 func (m SessionModel) viewList() string {
 	var b strings.Builder
 	b.WriteString("Session list\n")
-	b.WriteString(fmt.Sprintf("Sessions: %d\n", len(m.items)))
-	b.WriteString("↑↓ move, →/enter/click open, esc quit\n\n")
+	b.WriteString("\n")
+	b.WriteString(m.viewAgentTabs())
+	b.WriteByte('\n')
+	b.WriteString("←/→ switch agent, ↑↓ move session, enter/click open, esc quit\n\n")
 
 	if len(m.items) == 0 {
 		b.WriteString("(no sessions)\n")
@@ -389,7 +405,10 @@ func (m SessionModel) viewList() string {
 	for index := start; index < end; index++ {
 		cursor := "  "
 		if index == m.cursor {
-			cursor = "> "
+			cursor = lipgloss.NewStyle().
+				Foreground(sessionAgentAccent(m.activeAgentName())).
+				Bold(true).
+				Render("> ")
 		}
 		b.WriteString(cursor)
 		b.WriteString(formatSessionRow(m.items[index]))
@@ -399,6 +418,14 @@ func (m SessionModel) viewList() string {
 		b.WriteString(fmt.Sprintf("↓ %d more\n", len(m.items)-end))
 	}
 	return b.String()
+}
+
+func (m SessionModel) viewAgentTabs() string {
+	tabs := make([]string, 0, len(m.tabs))
+	for index, tab := range m.tabs {
+		tabs = append(tabs, renderSessionTab(tab.agent, len(tab.items), index == m.activeAgent))
+	}
+	return strings.Join(tabs, " ")
 }
 
 func (m SessionModel) viewLoading() string {
@@ -450,12 +477,30 @@ func (m SessionModel) selectedItem() model.AgentSession {
 	return model.AgentSession{}
 }
 
+func sessionAgentAccent(agent string) lipgloss.Color {
+	if color, ok := sessionAgentColors[agent]; ok {
+		return color
+	}
+	return sessionFallbackColor
+}
+
+func renderSessionTab(agent string, count int, active bool) string {
+	accent := sessionAgentAccent(agent)
+	style := lipgloss.NewStyle().Padding(0, 1)
+	if active {
+		style = style.Foreground(lipgloss.Color("15")).Background(accent).Bold(true)
+	} else {
+		style = style.Foreground(accent).Faint(true)
+	}
+	return style.Render(fmt.Sprintf("%s %d", agent, count))
+}
+
 func formatSessionRow(item model.AgentSession) string {
 	lastActivity := "-"
 	if !item.LastActivity.IsZero() {
 		lastActivity = item.LastActivity.Local().Format("2006-01-02 15:04:05")
 	}
-	return truncateRune(fmt.Sprintf("%s  %s  %s", item.Agent, item.ID, lastActivity), 120)
+	return truncateRune(fmt.Sprintf("%s  %s", lastActivity, item.ID), 120)
 }
 
 func formatSessionEvent(event model.SessionEvent, width int) string {
