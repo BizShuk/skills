@@ -34,15 +34,15 @@
 - Create: svc/session/detail.go — exported LoadDetail dispatch 與 source path error context。
 - Create: svc/session/detail_scan.go — JSON/JSONL record scanning，保留 raw line 與 malformed skip。
 - Create: svc/session/detail_normalize.go — generic nested text、timestamp、role、kind normalization helpers。
-- Create: svc/session/detail_claude.go — Claude message/tool/system normalization。
-- Create: svc/session/detail_codex.go — Codex response_item/event_msg normalization。
-- Create: svc/session/detail_grok.go — Grok prompt_history.jsonl/summary.json normalization。
-- Create: svc/session/detail_structured.go — structured provider best-effort normalization。
+- Modify: svc/session/claude.go — Claude message/tool/system normalization。
+- Modify: svc/session/codex.go — Codex response_item/event_msg normalization。
+- Modify: svc/session/grok.go — Grok prompt_history.jsonl/summary.json normalization。
+- Modify: svc/session/structured.go — structured provider best-effort normalization。
 - Create: svc/session/detail_test.go — shared fixture helpers and service dispatch/error tests。
-- Create: svc/session/detail_claude_test.go — Claude fixtures。
-- Create: svc/session/detail_codex_test.go — Codex fixtures。
-- Create: svc/session/detail_grok_test.go — Grok fixtures。
-- Create: svc/session/detail_structured_test.go — structured/raw fallback fixtures。
+- Modify: svc/session/claude_test.go — Claude fixtures。
+- Modify: svc/session/codex_test.go — Codex fixtures。
+- Modify: svc/session/grok_test.go — Grok fixtures。
+- Modify: svc/session/structured_test.go — structured/raw fallback fixtures。
 
 ### TUI and command
 
@@ -228,10 +228,10 @@ git commit -m "feat: add session detail scanning helpers"
 
 **Files:**
 
-- Create: svc/session/detail_claude.go
-- Create: svc/session/detail_codex.go
-- Create: svc/session/detail_claude_test.go
-- Create: svc/session/detail_codex_test.go
+- Modify: svc/session/claude.go
+- Modify: svc/session/codex.go
+- Modify: svc/session/claude_test.go
+- Modify: svc/session/codex_test.go
 
 **Interfaces:**
 
@@ -264,7 +264,7 @@ Scan item.Path; for each valid record use message.role when present, extract mes
 
 - [ ] **Step 4: Run the Claude test**
 
-Run: gofmt -w svc/session/detail_claude.go svc/session/detail_claude_test.go && go test ./svc/session -run TestLoadClaudeDetailNormalizesTimeline -count=1
+Run: gofmt -w svc/session/claude.go svc/session/claude_test.go && go test ./svc/session -run TestLoadClaudeDetailNormalizesTimeline -count=1
 
 Expected: PASS.
 
@@ -280,14 +280,14 @@ Expected: FAIL because loadCodexDetail is undefined.
 
 Read payload.type only for Codex-specific branches. Handle message, function_call, custom_tool_call, function_call_output, custom_tool_call_output, user_message, and agent_message; use generic raw fallback for unknown valid payloads. Read the session title from the first user message when available.
 
-Run: gofmt -w svc/session/detail_codex.go svc/session/detail_codex_test.go && go test ./svc/session -run TestLoadCodexDetailNormalizesTimeline -count=1
+Run: gofmt -w svc/session/codex.go svc/session/codex_test.go && go test ./svc/session -run TestLoadCodexDetailNormalizesTimeline -count=1
 
 Expected: PASS.
 
 - [ ] **Step 7: Commit Claude/Codex detail parsers**
 
 ~~~bash
-git add svc/session/detail_claude.go svc/session/detail_claude_test.go svc/session/detail_codex.go svc/session/detail_codex_test.go
+git add svc/session/claude.go svc/session/claude_test.go svc/session/codex.go svc/session/codex_test.go
 git commit -m "feat: normalize claude and codex session details"
 ~~~
 
@@ -295,10 +295,10 @@ git commit -m "feat: normalize claude and codex session details"
 
 **Files:**
 
-- Create: svc/session/detail_grok.go
-- Create: svc/session/detail_structured.go
-- Create: svc/session/detail_grok_test.go
-- Create: svc/session/detail_structured_test.go
+- Modify: svc/session/grok.go
+- Modify: svc/session/structured.go
+- Modify: svc/session/grok_test.go
+- Modify: svc/session/structured_test.go
 
 **Interfaces:**
 
@@ -317,7 +317,7 @@ Expected: FAIL because loadGrokDetail is undefined.
 
 Read summary.json from item.Path, read the parent prompt_history.jsonl, filter exact session_id == item.ID, and retain prompt timestamps. Skip malformed prompt lines. Use the summary title as a system/event summary only if non-empty.
 
-Run: gofmt -w svc/session/detail_grok.go svc/session/detail_grok_test.go && go test ./svc/session -run TestLoadGrokDetailFiltersPromptHistory -count=1
+Run: gofmt -w svc/session/grok.go svc/session/grok_test.go && go test ./svc/session -run TestLoadGrokDetailFiltersPromptHistory -count=1
 
 Expected: PASS.
 
@@ -333,14 +333,14 @@ Expected: FAIL because loadStructuredDetail is undefined.
 
 Walk item.Path when it is a directory, otherwise scan the single file. Parse .json and .jsonl only; pass records through generic normalization and use explicit nested cwd fields to fill CWD. Do not attribute arbitrary content to the working directory.
 
-Run: gofmt -w svc/session/detail_structured.go svc/session/detail_structured_test.go && go test ./svc/session -run TestLoadStructuredDetailPreservesRawFallback -count=1
+Run: gofmt -w svc/session/structured.go svc/session/structured_test.go && go test ./svc/session -run TestLoadStructuredDetailPreservesRawFallback -count=1
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit Grok/structured detail parsers**
 
 ~~~bash
-git add svc/session/detail_grok.go svc/session/detail_grok_test.go svc/session/detail_structured.go svc/session/detail_structured_test.go
+git add svc/session/grok.go svc/session/grok_test.go svc/session/structured.go svc/session/structured_test.go
 git commit -m "feat: normalize grok and structured session details"
 ~~~
 
