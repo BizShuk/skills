@@ -10,6 +10,7 @@
 - 執行全部單元測試：`go test ./...`
 - 執行特定套件測試：`go test ./svc/agent/... -v`
 - 執行 session 子命令測試：`go test ./svc/session/... -v`
+- 執行 session TUI 測試：`go test ./svc/tui/... -v`
 - 安裝執行檔到本機：`GOBIN=$HOME/.local/bin go install ./cmd/skills`
 
 ## 程式碼風格與規範 (Code Style & Guidelines)

@@ -2,7 +2,6 @@ package session
 
 import (
 	"encoding/json"
-	"sort"
 	"strings"
 	"time"
 
@@ -233,21 +232,4 @@ func detailRaw(record map[string]any, raw string) string {
 		return ""
 	}
 	return string(data)
-}
-
-func compactJSON(value any) string {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-func sortedMapKeys(value map[string]any) []string {
-	keys := make([]string, 0, len(value))
-	for key := range value {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

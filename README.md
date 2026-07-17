@@ -47,6 +47,8 @@ skills session
 命令會讀取 `svc/agent/providers/` 的 `sessionDirs`，只列出 session
 metadata 明確指向目前工作目錄的項目；缺少 session 目錄時會顯示空結果。
 
+有 session 時會進入互動式 TUI：使用 `↑`/`↓` 移動，按 `→`、`Enter` 或滑鼠左鍵開啟 detail；在 detail 畫面按 `←` 或 `Esc` 返回列表，並可用 `↑`/`↓`、`PageUp`/`PageDown` 捲動 timeline。完整 transcript 採 lazy loading，只在開啟選取的 session 時讀取。
+
 ## Flags
 
 | Flag | 說明 |
