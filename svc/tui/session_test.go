@@ -33,6 +33,38 @@ func TestSessionModelStartsOnListAndRendersRows(t *testing.T) {
 	assert.Equal(t, 0, m.cursor)
 }
 
+func TestNewSessionModelGroupsSessionsByAgentInFirstSeenOrder(t *testing.T) {
+	items := []model.AgentSession{
+		{Agent: "codex", ID: "codex-1"},
+		{Agent: "claude-code", ID: "claude-1"},
+		{Agent: "codex", ID: "codex-2"},
+	}
+
+	m := NewSessionModel(items, nil)
+
+	assert.Equal(t, []string{"codex", "claude-code"}, m.agentNames())
+	assert.Equal(t, 0, m.activeAgent)
+	assert.Equal(t, []string{"codex-1", "codex-2"}, sessionIDs(m.items))
+	assert.Equal(t, map[string]int{"codex": 0, "claude-code": 0}, m.cursorByAgent)
+	assert.Equal(t, map[string]int{"codex": 0, "claude-code": 0}, m.offsetByAgent)
+}
+
+func TestNewSessionModelWithNoSessionsHasNoAgentTabs(t *testing.T) {
+	m := NewSessionModel(nil, nil)
+
+	assert.Empty(t, m.agentNames())
+	assert.Empty(t, m.items)
+	assert.Equal(t, -1, m.activeAgent)
+}
+
+func sessionIDs(items []model.AgentSession) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
 func TestSessionModelRightArrowLoadsDetail(t *testing.T) {
 	want := model.AgentSessionDetail{
 		Session: sampleSessions()[0],

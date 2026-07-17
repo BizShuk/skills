@@ -26,16 +26,27 @@ const (
 // SessionDetailLoader loads the full timeline for one selected session.
 type SessionDetailLoader func(model.AgentSession) (model.AgentSessionDetail, error)
 
+type sessionTab struct {
+	agent string
+	items []model.AgentSession
+}
+
 // SessionModel is the two-screen Bubble Tea model for agent sessions.
 // The list is metadata-only until a session is opened; detail loading is
 // performed by the injected SessionDetailLoader command.
 type SessionModel struct {
-	items  []model.AgentSession
-	loader SessionDetailLoader
+	items []model.AgentSession
+	tabs  []sessionTab
 
-	phase  sessionPhase
-	cursor int
-	offset int
+	loader      SessionDetailLoader
+	activeAgent int
+
+	cursor        int
+	offset        int
+	cursorByAgent map[string]int
+	offsetByAgent map[string]int
+
+	phase sessionPhase
 
 	detail       model.AgentSessionDetail
 	detailErr    error
@@ -53,13 +64,62 @@ type detailLoadedMsg struct {
 
 // NewSessionModel creates a session list model with the selected row at zero.
 func NewSessionModel(items []model.AgentSession, loader SessionDetailLoader) SessionModel {
-	copyItems := append([]model.AgentSession(nil), items...)
-	return SessionModel{
-		items:          copyItems,
+	tabs := buildSessionTabs(items)
+	m := SessionModel{
+		tabs:           tabs,
 		loader:         loader,
+		activeAgent:    -1,
 		phase:          sessionListPhase,
 		viewportHeight: defaultSessionViewport,
+		cursorByAgent:  make(map[string]int, len(tabs)),
+		offsetByAgent:  make(map[string]int, len(tabs)),
 	}
+	for _, tab := range tabs {
+		m.cursorByAgent[tab.agent] = 0
+		m.offsetByAgent[tab.agent] = 0
+	}
+	if len(tabs) > 0 {
+		m.activeAgent = 0
+		m.items = append([]model.AgentSession(nil), tabs[0].items...)
+	}
+	return m
+}
+
+func buildSessionTabs(items []model.AgentSession) []sessionTab {
+	tabs := make([]sessionTab, 0)
+	indexes := make(map[string]int)
+	for _, item := range items {
+		index, ok := indexes[item.Agent]
+		if !ok {
+			index = len(tabs)
+			indexes[item.Agent] = index
+			tabs = append(tabs, sessionTab{agent: item.Agent})
+		}
+		tabs[index].items = append(tabs[index].items, item)
+	}
+	return tabs
+}
+
+func (m SessionModel) agentNames() []string {
+	names := make([]string, 0, len(m.tabs))
+	for _, tab := range m.tabs {
+		names = append(names, tab.agent)
+	}
+	return names
+}
+
+func (m SessionModel) activeAgentName() string {
+	if m.activeAgent < 0 || m.activeAgent >= len(m.tabs) {
+		return ""
+	}
+	return m.tabs[m.activeAgent].agent
+}
+
+func (m SessionModel) activeItems() []model.AgentSession {
+	if m.activeAgent < 0 || m.activeAgent >= len(m.tabs) {
+		return nil
+	}
+	return m.tabs[m.activeAgent].items
 }
 
 // Init satisfies tea.Model. Session detail loading starts only after a user
