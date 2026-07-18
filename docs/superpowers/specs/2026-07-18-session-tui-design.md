@@ -12,6 +12,10 @@
 
 ## 範圍與非目標
 
+> Session list discovery 已由
+> [`2026-07-18-session-metadata-only-list-design.md`](2026-07-18-session-metadata-only-list-design.md)
+> 更新：list 僅讀 path、filesystem metadata 或外部 index；detail 才解析 transcript。
+
 包含 Claude、Codex、Grok，以及目前 provider 設定中其他 structured session
 格式的 detail 讀取。沿用既有 `sessionDirs` 與 `List(cwd)` 的 session 篩選結果。
 
@@ -22,12 +26,12 @@
 
 各 agent 的儲存格式不同，不能用一個 raw struct 直接反序列化所有來源：
 
-| Agent | 儲存形式 | 關鍵欄位 | Detail 來源 |
-| --- | --- | --- | --- |
-| Claude | 逐行 JSONL | `type`、`timestamp`、`sessionId`、`message.role`、`message.content` | session `.jsonl` |
-| Codex | 逐行 JSONL | `type`、`payload.type`、`payload.role`、`payload.content` | session `.jsonl` |
-| Grok | session directory + JSON/JSONL | `summary.json`、`prompt_history.jsonl`、`session_id` | session directory 的 parent/root metadata |
-| Antigravity/Hermes/OpenCode/Pi | provider-specific JSON/JSONL | nested `cwd` / `Cwd` / `workdir` 與 message-like fields | session path 下的 structured files |
+| Agent                          | 儲存形式                       | 關鍵欄位                                                            | Detail 來源                               |
+| ------------------------------ | ------------------------------ | ------------------------------------------------------------------- | ----------------------------------------- |
+| Claude                         | 逐行 JSONL                     | `type`、`timestamp`、`sessionId`、`message.role`、`message.content` | session `.jsonl`                          |
+| Codex                          | 逐行 JSONL                     | `type`、`payload.type`、`payload.role`、`payload.content`           | session `.jsonl`                          |
+| Grok                           | session directory + JSON/JSONL | `summary.json`、`prompt_history.jsonl`、`session_id`                | session directory 的 parent/root metadata |
+| Antigravity/Hermes/OpenCode/Pi | provider-specific JSON/JSONL   | nested `cwd` / `Cwd` / `workdir` 與 message-like fields             | session path 下的 structured files        |
 
 Claude 與 Codex 的單行 record 也可能是 hook、progress、tool result、image 或
 其他系統事件，因此 parser 必須採 best-effort normalization；未知 record 不得
@@ -39,18 +43,18 @@ Claude 與 Codex 的單行 record 也可能是 hook、progress、tool result、i
 
 ```go
 type SessionEvent struct {
-	Timestamp time.Time
-	Role      string
-	Kind      string
-	Summary   string
-	Raw       string
+ Timestamp time.Time
+ Role      string
+ Kind      string
+ Summary   string
+ Raw       string
 }
 
 type AgentSessionDetail struct {
-	Session AgentSession
-	Title   string
-	CWD     string
-	Events  []SessionEvent
+ Session AgentSession
+ Title   string
+ CWD     string
+ Events  []SessionEvent
 }
 ```
 
