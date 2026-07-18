@@ -108,7 +108,7 @@ func TestSessionEventAccentUsesSemanticColors(t *testing.T) {
 
 func TestFormatSessionEventKeepsPlainContent(t *testing.T) {
 	event := model.SessionEvent{
-		Timestamp: time.Date(2026, time.July, 18, 9, 30, 0, 0, time.UTC),
+		Timestamp: time.Date(2026, time.July, 18, 9, 30, 0, 0, time.Local),
 		Role:      "tool",
 		Kind:      "tool_call",
 		Summary:   "apply_patch",

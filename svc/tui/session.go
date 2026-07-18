@@ -29,6 +29,16 @@ var sessionAgentColors = map[string]lipgloss.Color{
 
 const sessionFallbackColor = lipgloss.Color("81")
 
+var sessionEventColors = map[string]lipgloss.Color{
+	"tool_call":         lipgloss.Color("208"),
+	"raw":               lipgloss.Color("244"),
+	"system_event":      lipgloss.Color("220"),
+	"user_message":      lipgloss.Color("39"),
+	"assistant_message": lipgloss.Color("42"),
+}
+
+const sessionEventFallbackColor = lipgloss.Color("81")
+
 type sessionPhase int
 
 const (
@@ -503,6 +513,25 @@ func formatSessionRow(item model.AgentSession) string {
 	return truncateRune(fmt.Sprintf("%s  %s", lastActivity, item.ID), 120)
 }
 
+func sessionEventAccent(event model.SessionEvent) lipgloss.Color {
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	role := strings.ToLower(strings.TrimSpace(event.Role))
+	switch {
+	case kind == "tool_call":
+		return sessionEventColors["tool_call"]
+	case kind == "raw":
+		return sessionEventColors["raw"]
+	case kind == "event", kind == "system_event", role == "system":
+		return sessionEventColors["system_event"]
+	case kind == "message" && role == "user":
+		return sessionEventColors["user_message"]
+	case kind == "message" && role == "assistant":
+		return sessionEventColors["assistant_message"]
+	default:
+		return sessionEventFallbackColor
+	}
+}
+
 func formatSessionEvent(event model.SessionEvent, width int) string {
 	timestamp := "-"
 	if !event.Timestamp.IsZero() {
@@ -532,7 +561,8 @@ func formatSessionEvent(event model.SessionEvent, width int) string {
 	if maxWidth <= 0 {
 		maxWidth = 120
 	}
-	return truncateRune(line, maxWidth)
+	line = truncateRune(line, maxWidth)
+	return lipgloss.NewStyle().Foreground(sessionEventAccent(event)).Render(line)
 }
 
 func displayOrDash(value string) string {
