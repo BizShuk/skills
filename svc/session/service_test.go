@@ -205,16 +205,22 @@ func TestListSortsByLastActivityThenAgentAndID(t *testing.T) {
 	t.Setenv("HOME", home)
 	homedir.DisableCache = true
 	cwd := filepath.Join(t.TempDir(), "workspace")
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o755))
+	claudeProject := filepath.Join(home, ".claude", "projects", claudeProjectKey(cwd))
+	require.NoError(t, os.MkdirAll(claudeProject, 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex", "sessions"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex", "archived_sessions"), 0o755))
 
-	writeJSONL(t, filepath.Join(home, ".claude", "projects", "claude-a.jsonl"),
+	claudeA := filepath.Join(claudeProject, "claude-a.jsonl")
+	claudeB := filepath.Join(claudeProject, "claude-b.jsonl")
+	writeJSONL(t, claudeA,
 		`{"sessionId":"claude-a","cwd":"`+cwd+`","timestamp":"2026-07-18T08:00:00Z"}`,
 	)
-	writeJSONL(t, filepath.Join(home, ".claude", "projects", "claude-b.jsonl"),
+	writeJSONL(t, claudeB,
 		`{"sessionId":"claude-b","cwd":"`+cwd+`","timestamp":"2026-07-18T08:00:00Z"}`,
 	)
+	wantClaudeTime := time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(claudeA, wantClaudeTime, wantClaudeTime))
+	require.NoError(t, os.Chtimes(claudeB, wantClaudeTime, wantClaudeTime))
 	writeJSONL(t, filepath.Join(home, ".codex", "sessions", "codex-new.jsonl"),
 		`{"type":"session_meta","payload":{"id":"codex-new","cwd":"`+cwd+`"}}`,
 		`{"timestamp":"2026-07-18T09:00:00Z"}`,
