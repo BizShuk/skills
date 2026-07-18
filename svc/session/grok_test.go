@@ -5,41 +5,34 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bizshuk/skills/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiscoverGrokFiltersEscapedProjectRoot(t *testing.T) {
+func TestDiscoverGrokReadsOnlyCurrentProjectSessionDirectories(t *testing.T) {
 	root := t.TempDir()
 	cwd := filepath.Join(t.TempDir(), "workspace")
 	project := filepath.Join(root, url.PathEscape(cwd))
 	other := filepath.Join(root, url.PathEscape(filepath.Join(t.TempDir(), "other")))
-	require.NoError(t, os.MkdirAll(filepath.Join(project, "session-a"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(project, "session-b"), 0o755))
+	sessionPath := filepath.Join(project, "session-a")
+	require.NoError(t, os.MkdirAll(filepath.Join(sessionPath, "nested"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(other, "session-other"), 0o755))
+	writeJSONL(t, filepath.Join(sessionPath, "summary.json"), `not-json`)
+	writeJSONL(t, filepath.Join(project, "prompt_history.jsonl"), `not-json`)
 
-	writeJSONL(t, filepath.Join(project, "session-a", "summary.json"),
-		`{"created_at":"2026-07-18T08:00:00Z","updated_at":"2026-07-18T08:10:00Z"}`,
-	)
-	writeJSONL(t, filepath.Join(project, "session-b", "summary.json"),
-		`{"created_at":"2026-07-18T08:05:00Z","updated_at":"2026-07-18T08:20:00Z"}`,
-	)
-	writeJSONL(t, filepath.Join(project, "session-b", "prompt_context.json"),
-		`{"working_directory":"`+cwd+`"}`,
-	)
-	writeJSONL(t, filepath.Join(other, "session-other", "summary.json"),
-		`{"created_at":"2026-07-18T09:00:00Z","updated_at":"2026-07-18T09:30:00Z"}`,
-	)
+	wantTime := time.Date(2026, 7, 18, 8, 20, 0, 0, time.Local)
+	require.NoError(t, os.Chtimes(sessionPath, wantTime, wantTime))
 
 	got, err := discoverGrok(root, cwd)
 	require.NoError(t, err)
-	require.Len(t, got, 2)
-	assert.ElementsMatch(t, []string{"session-a", "session-b"}, []string{got[0].ID, got[1].ID})
-	for _, item := range got {
-		assert.Equal(t, "grok", item.Agent)
-	}
+	require.Len(t, got, 1)
+	assert.Equal(t, "session-a", got[0].ID)
+	assert.Equal(t, "grok", got[0].Agent)
+	assert.Equal(t, sessionPath, got[0].Path)
+	assert.Equal(t, wantTime, got[0].LastActivity)
 }
 
 func TestLoadGrokDetailFiltersPromptHistory(t *testing.T) {
