@@ -1,43 +1,84 @@
 package session
 
 import (
-	"path/filepath"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bizshuk/skills/model"
+	_ "modernc.org/sqlite"
 )
 
-func discoverCodex(root, cwd string) ([]model.AgentSession, error) {
-	sessions := make([]model.AgentSession, 0)
-	err := walkJSONLFiles(root, func(path string) error {
-		var metadata sessionMetadata
-		err := scanJSONL(path, func(record map[string]any) {
-			metadata.addTimestamp(record["timestamp"])
-			if record["type"] != "session_meta" {
-				return
-			}
-			payload, ok := record["payload"].(map[string]any)
-			if !ok {
-				return
-			}
-			if id, ok := payload["id"].(string); ok {
-				metadata.addID(id)
-			}
-			if directory, ok := payload["cwd"].(string); ok {
-				metadata.addWorkingDirectories([]string{directory}, cwd)
-			}
+func discoverCodex(indexPath, cwd string) ([]model.AgentSession, error) {
+	info, err := os.Stat(indexPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return []model.AgentSession{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("session index is not a regular file: %s", indexPath)
+	}
+
+	dsn := url.URL{Scheme: "file", Path: indexPath}
+	query := dsn.Query()
+	query.Set("mode", "ro")
+	dsn.RawQuery = query.Encode()
+	db, err := sql.Open("sqlite", dsn.String())
+	if err != nil {
+		return nil, fmt.Errorf("open Codex session index: %w", err)
+	}
+	defer func() {
+		_ = db.Close() // Read-only connection has no pending writes to flush.
+	}()
+	db.SetMaxOpenConns(1)
+
+	rows, err := db.Query(`SELECT id, rollout_path,
+		COALESCE(created_at_ms, created_at * 1000),
+		COALESCE(updated_at_ms, updated_at * 1000)
+		FROM threads WHERE cwd = ?`, cwd)
+	if err != nil {
+		if unsupportedCodexIndexSchema(err) {
+			return []model.AgentSession{}, nil
+		}
+		return nil, fmt.Errorf("query Codex session index: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []model.AgentSession
+	for rows.Next() {
+		var id, path string
+		var createdAtMS, updatedAtMS int64
+		if err := rows.Scan(&id, &path, &createdAtMS, &updatedAtMS); err != nil {
+			return nil, fmt.Errorf("scan Codex session index: %w", err)
+		}
+		if strings.TrimSpace(id) == "" || strings.TrimSpace(path) == "" {
+			continue
+		}
+		sessions = append(sessions, model.AgentSession{
+			Agent:        "codex",
+			ID:           id,
+			StartedAt:    time.UnixMilli(createdAtMS),
+			LastActivity: time.UnixMilli(updatedAtMS),
+			Path:         path,
 		})
-		if err != nil {
-			return nil
-		}
-		fallbackID := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		if session, ok := metadata.session("codex", path, fallbackID); ok {
-			sessions = append(sessions, session)
-		}
-		return nil
-	})
-	return sessions, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate Codex session index: %w", err)
+	}
+	return sessions, nil
+}
+
+func unsupportedCodexIndexSchema(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "no such table: threads") ||
+		strings.Contains(message, "no such column:")
 }
 
 func loadCodexDetail(item model.AgentSession) (model.AgentSessionDetail, error) {

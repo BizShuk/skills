@@ -1,6 +1,7 @@
 package session
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,29 +10,82 @@ import (
 	"github.com/bizshuk/skills/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 )
 
-func TestDiscoverCodexScansArchivedRootAndUsesSessionMeta(t *testing.T) {
+func createCodexIndexFixture(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE threads (
+		id TEXT PRIMARY KEY,
+		rollout_path TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL,
+		cwd TEXT NOT NULL,
+		created_at_ms INTEGER,
+		updated_at_ms INTEGER
+	)`)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	return db
+}
+
+func TestDiscoverCodexUsesThreadIndexWithoutReadingRollouts(t *testing.T) {
 	root := t.TempDir()
+	indexPath := filepath.Join(root, "state_5.sqlite")
+	db := createCodexIndexFixture(t, indexPath)
 	cwd := filepath.Join(root, "workspace")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "nested"), 0o755))
+	otherCWD := filepath.Join(root, "other")
+	activePath := filepath.Join(root, "active.jsonl")
+	archivedPath := filepath.Join(root, "archived.jsonl")
+	require.NoError(t, os.WriteFile(activePath, []byte("not-json"), 0o644))
+	require.NoError(t, os.WriteFile(archivedPath, []byte("not-json"), 0o644))
 
-	writeJSONL(t, filepath.Join(root, "nested", "rollout.jsonl"),
-		`{"type":"session_meta","payload":{"id":"active","cwd":"`+cwd+`"}}`,
-		`{"type":"event_msg","timestamp":"2026-07-18T08:20:00Z"}`,
+	_, err := db.Exec(`INSERT INTO threads
+		(id, rollout_path, created_at, updated_at, cwd, created_at_ms, updated_at_ms)
+		VALUES
+		('active', ?, 10, 20, ?, 10001, 20001),
+		('archived', ?, 30, 40, ?, NULL, NULL),
+		('other', '/tmp/other.jsonl', 50, 60, ?, 50001, 60001)`,
+		activePath, cwd, archivedPath, cwd, otherCWD,
 	)
-	writeJSONL(t, filepath.Join(root, "archived.jsonl"),
-		`{"type":"session_meta","payload":{"id":"archived","cwd":"`+cwd+`"}}`,
-		`{"type":"event_msg","timestamp":"2026-07-18T07:20:00Z"}`,
-	)
+	require.NoError(t, err)
 
-	got, err := discoverCodex(root, cwd)
+	got, err := discoverCodex(indexPath, cwd)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
-	assert.ElementsMatch(t, []string{"active", "archived"}, []string{got[0].ID, got[1].ID})
-	for _, item := range got {
-		assert.Equal(t, "codex", item.Agent)
-	}
+	byID := map[string]model.AgentSession{got[0].ID: got[0], got[1].ID: got[1]}
+	assert.Equal(t, activePath, byID["active"].Path)
+	assert.Equal(t, time.UnixMilli(10001), byID["active"].StartedAt)
+	assert.Equal(t, time.UnixMilli(20001), byID["active"].LastActivity)
+	assert.Equal(t, time.UnixMilli(30000), byID["archived"].StartedAt)
+	assert.Equal(t, time.UnixMilli(40000), byID["archived"].LastActivity)
+}
+
+func TestDiscoverCodexMissingOrIncompatibleIndexReturnsEmpty(t *testing.T) {
+	cwd := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing.sqlite")
+	got, err := discoverCodex(missing, cwd)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	incompatible := filepath.Join(t.TempDir(), "incompatible.sqlite")
+	db, err := sql.Open("sqlite", incompatible)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE unrelated (id TEXT)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	got, err = discoverCodex(incompatible, cwd)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestDiscoverCodexRejectsNonFileIndex(t *testing.T) {
+	_, err := discoverCodex(t.TempDir(), t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "session index is not a regular file")
 }
 
 func TestLoadCodexDetailNormalizesTimeline(t *testing.T) {
