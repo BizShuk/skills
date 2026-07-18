@@ -117,6 +117,23 @@ func TestListAgentsKeepsSessionDirsSequentialWithinAgent(t *testing.T) {
 	}
 }
 
+func TestScanAgentUsesSessionIndexInsteadOfSessionDirs(t *testing.T) {
+	configured := agent.Agent{
+		Type:         "codex",
+		SessionDirs:  []string{"current", "archived"},
+		SessionIndex: "state.sqlite",
+	}
+	var visited []string
+	discover := func(agentName, source, cwd string) ([]model.AgentSession, error) {
+		visited = append(visited, source)
+		return nil, nil
+	}
+
+	_, err := scanAgent(configured, "/workspace", discover)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"state.sqlite"}, visited)
+}
+
 func TestListAgentsReturnsFirstConfiguredAgentError(t *testing.T) {
 	firstErr := errors.New("first agent failed")
 	secondErr := errors.New("second agent failed")
@@ -207,8 +224,6 @@ func TestListSortsByLastActivityThenAgentAndID(t *testing.T) {
 	cwd := filepath.Join(t.TempDir(), "workspace")
 	claudeProject := filepath.Join(home, ".claude", "projects", claudeProjectKey(cwd))
 	require.NoError(t, os.MkdirAll(claudeProject, 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex", "sessions"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex", "archived_sessions"), 0o755))
 
 	claudeA := filepath.Join(claudeProject, "claude-a.jsonl")
 	claudeB := filepath.Join(claudeProject, "claude-b.jsonl")
@@ -218,17 +233,20 @@ func TestListSortsByLastActivityThenAgentAndID(t *testing.T) {
 	writeJSONL(t, claudeB,
 		`{"sessionId":"claude-b","cwd":"`+cwd+`","timestamp":"2026-07-18T08:00:00Z"}`,
 	)
-	wantClaudeTime := time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC)
-	require.NoError(t, os.Chtimes(claudeA, wantClaudeTime, wantClaudeTime))
-	require.NoError(t, os.Chtimes(claudeB, wantClaudeTime, wantClaudeTime))
-	writeJSONL(t, filepath.Join(home, ".codex", "sessions", "codex-new.jsonl"),
-		`{"type":"session_meta","payload":{"id":"codex-new","cwd":"`+cwd+`"}}`,
-		`{"timestamp":"2026-07-18T09:00:00Z"}`,
+	base := time.Date(2026, time.July, 18, 8, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(claudeA, base, base))
+	require.NoError(t, os.Chtimes(claudeB, base, base))
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
+	db := createCodexIndexFixture(t, filepath.Join(home, ".codex", "state_5.sqlite"))
+	_, err := db.Exec(`INSERT INTO threads
+		(id, rollout_path, created_at, updated_at, cwd, created_at_ms, updated_at_ms)
+		VALUES
+		('codex-new', '/tmp/codex-new.jsonl', 0, 0, ?, ?, ?),
+		('codex-old', '/tmp/codex-old.jsonl', 0, 0, ?, ?, ?)`,
+		cwd, base.Add(time.Hour).UnixMilli(), base.Add(time.Hour).UnixMilli(),
+		cwd, base.Add(-time.Hour).UnixMilli(), base.Add(-time.Hour).UnixMilli(),
 	)
-	writeJSONL(t, filepath.Join(home, ".codex", "archived_sessions", "codex-old.jsonl"),
-		`{"type":"session_meta","payload":{"id":"codex-old","cwd":"`+cwd+`"}}`,
-		`{"timestamp":"2026-07-18T07:00:00Z"}`,
-	)
+	require.NoError(t, err)
 
 	got, err := List(cwd)
 	require.NoError(t, err)
@@ -236,6 +254,19 @@ func TestListSortsByLastActivityThenAgentAndID(t *testing.T) {
 	assert.Equal(t, []string{"codex-new", "claude-a", "claude-b", "codex-old"}, []string{
 		got[0].ID, got[1].ID, got[2].ID, got[3].ID,
 	})
+}
+
+func TestDiscoverProviderDoesNotScanUnsupportedStructuredProviders(t *testing.T) {
+	root := t.TempDir()
+	writeJSONL(t, filepath.Join(root, "session.jsonl"),
+		`{"cwd":"/workspace","timestamp":"2026-07-18T08:00:00Z"}`,
+	)
+
+	for _, agentName := range []string{"antigravity", "antigravity-cli", "hermes-agent", "opencode", "pi"} {
+		got, err := discoverProvider(agentName, root, "/workspace")
+		require.NoError(t, err)
+		assert.Empty(t, got, agentName)
+	}
 }
 
 func TestListMissingRootsReturnEmptyResult(t *testing.T) {

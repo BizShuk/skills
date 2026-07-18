@@ -71,7 +71,11 @@ func listAgents(configured []agent.Agent, cwd string, discover providerDiscovere
 func scanAgent(configured agent.Agent, cwd string, discover providerDiscoverer) ([]model.AgentSession, error) {
 	agentName := string(configured.Type)
 	var sessions []model.AgentSession
-	for _, root := range configured.SessionDirs {
+	sources := configured.SessionDirs
+	if strings.TrimSpace(configured.SessionIndex) != "" {
+		sources = []string{configured.SessionIndex}
+	}
+	for _, root := range sources {
 		if strings.TrimSpace(root) == "" {
 			continue
 		}
@@ -92,8 +96,6 @@ func discoverProvider(agentName, root, cwd string) ([]model.AgentSession, error)
 		return discoverCodex(root, cwd)
 	case "grok":
 		return discoverGrok(root, cwd)
-	case "antigravity", "antigravity-cli", "hermes-agent", "opencode", "pi":
-		return discoverStructured(root, cwd, agentName)
 	default:
 		return nil, nil
 	}
