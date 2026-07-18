@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,6 +62,25 @@ func TestProviderSessionDirsExpandHome(t *testing.T) {
 	}
 }
 
+func TestProviderSessionIndexExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	homedir.DisableCache = true
+
+	for _, got := range Agents() {
+		provider, ok := Find(Type(got.Type))
+		require.True(t, ok)
+		if got.Type != "codex" {
+			assert.Empty(t, provider.SessionIndex)
+			assert.Empty(t, got.SessionIndex)
+			continue
+		}
+
+		assert.Equal(t, "~/.codex/state_5.sqlite", provider.SessionIndex)
+		assert.Equal(t, filepath.Join(home, ".codex", "state_5.sqlite"), got.SessionIndex)
+	}
+}
+
 func TestParseSingleProvider(t *testing.T) {
 	raw := `{
       "type": "claude-code",
@@ -110,6 +130,9 @@ func TestProviderJSONFilesAreValid(t *testing.T) {
 			assert.Contains(t, raw, "userAgentsDir")
 			assert.Contains(t, raw, "detectDir")
 			assert.Contains(t, raw, "sessionDirs")
+			if raw["type"] == "codex" {
+				assert.Contains(t, raw, "sessionIndex")
+			}
 		})
 	}
 	_ = os.Getenv // keep os import available for future tests

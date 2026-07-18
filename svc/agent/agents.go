@@ -32,6 +32,7 @@ type Agent struct {
 	UserAgentsDir    string   // absolute
 	DetectDir        string   // if this dir exists on disk, the agent is "installed"
 	SessionDirs      []string // absolute session roots after `~/` expansion
+	SessionIndex     string   // absolute metadata index after `~/` expansion
 }
 
 // Agents returns the canonical install-location table, translated from the
@@ -64,6 +65,7 @@ func Agents() []Agent {
 			UserAgentsDir:    expand(p.UserAgentsDir),
 			DetectDir:        expand(p.DetectDir),
 			SessionDirs:      sessionDirs,
+			SessionIndex:     expand(p.SessionIndex),
 		})
 	}
 	return out

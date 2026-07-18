@@ -39,6 +39,7 @@ type Provider struct {
 	UserAgentsDir    string   `json:"userAgentsDir"`
 	DetectDir        string   `json:"detectDir"`
 	SessionDirs      []string `json:"sessionDirs"`
+	SessionIndex     string   `json:"sessionIndex,omitempty"`
 }
 
 // LoadAll reads every JSON file under providers/ and returns the parsed

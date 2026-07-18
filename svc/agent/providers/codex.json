@@ -6,5 +6,6 @@
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.codex/agents",
   "detectDir": "~/.codex",
-  "sessionDirs": ["~/.codex/sessions", "~/.codex/archived_sessions"]
+  "sessionDirs": ["~/.codex/sessions", "~/.codex/archived_sessions"],
+  "sessionIndex": "~/.codex/state_5.sqlite"
 }
