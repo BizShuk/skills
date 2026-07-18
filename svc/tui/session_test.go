@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -80,6 +81,43 @@ func TestSessionAgentAccentUsesStableAndFallbackColors(t *testing.T) {
 	assert.Equal(t, "81", string(sessionAgentAccent("unknown-agent")))
 	assert.Contains(t, renderSessionTab("codex", 2, true), "codex 2")
 	assert.Contains(t, renderSessionTab("codex", 2, false), "codex 2")
+}
+
+func TestSessionEventAccentUsesSemanticColors(t *testing.T) {
+	cases := []struct {
+		name  string
+		event model.SessionEvent
+		want  lipgloss.Color
+	}{
+		{name: "tool call", event: model.SessionEvent{Kind: "tool_call"}, want: lipgloss.Color("208")},
+		{name: "raw", event: model.SessionEvent{Kind: "raw"}, want: lipgloss.Color("244")},
+		{name: "event", event: model.SessionEvent{Kind: "event"}, want: lipgloss.Color("220")},
+		{name: "system role", event: model.SessionEvent{Kind: "message", Role: "system"}, want: lipgloss.Color("220")},
+		{name: "system event alias", event: model.SessionEvent{Kind: "system_event"}, want: lipgloss.Color("220")},
+		{name: "user message", event: model.SessionEvent{Kind: "message", Role: "user"}, want: lipgloss.Color("39")},
+		{name: "assistant message", event: model.SessionEvent{Kind: "message", Role: "assistant"}, want: lipgloss.Color("42")},
+		{name: "unknown", event: model.SessionEvent{Kind: "future_event"}, want: lipgloss.Color("81")},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.want, sessionEventAccent(testCase.event))
+		})
+	}
+}
+
+func TestFormatSessionEventKeepsPlainContent(t *testing.T) {
+	event := model.SessionEvent{
+		Timestamp: time.Date(2026, time.July, 18, 9, 30, 0, 0, time.UTC),
+		Role:      "tool",
+		Kind:      "tool_call",
+		Summary:   "apply_patch",
+	}
+
+	row := formatSessionEvent(event, 120)
+	assert.Contains(t, row, "09:30:00")
+	assert.Contains(t, row, "tool/tool_call")
+	assert.Contains(t, row, "apply_patch")
 }
 
 func sessionIDs(items []model.AgentSession) []string {
