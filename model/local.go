@@ -6,10 +6,11 @@ package model
 // Subagents are .md files discovered under `<Base>/agents/`,
 // `<Base>/.claude/agents/`, and `<Base>/.agents/agents/`.
 type LocalPlugin struct {
-	Name      string     // grouping name taken from manifest
-	Base      string     // absolute path of the plugin directory
-	Skills    []Skill    // union of conventional + additive skill dirs
-	Subagents []Subagent // .md files under agents/ directories
+	Name         string         // grouping name taken from manifest
+	Base         string         // absolute path of the plugin directory
+	Skills       []Skill        // union of conventional + additive skill dirs
+	Subagents    []Subagent     // .md files under agents/ directories
+	RemoteSkills []RemotePlugin // remote skill entries declared by plugin.json skills objects
 	// TopLevelAgents, when true, also scans top-level .md files in Base
 	// as subagents (the "flat .md" layout used by some marketplaces). Defaults
 	// to false; opt in via plugin.json's "topLevelAgents" field.

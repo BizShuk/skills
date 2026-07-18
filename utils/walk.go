@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,9 +14,10 @@ import (
 )
 
 type queueEntry struct {
-	parent *plugin.Category
-	dir    string
-	depth  int
+	parent           *plugin.Category
+	dir              string
+	depth            int
+	skipRemoteSkills bool
 }
 
 // Walk materializes root, then performs a level-by-level BFS over its
@@ -66,6 +68,76 @@ func Walk(ctx context.Context, f plugin.Fetcher, root plugin.ParsedSource, maxDe
 					return nil
 				}
 
+				attachCategory := func(parent *plugin.Category, c *plugin.Category) {
+					rootMu.Lock()
+					defer rootMu.Unlock()
+					if parent == nil {
+						cat.Roots = append(cat.Roots, c)
+					} else {
+						parent.Children = append(parent.Children, c)
+					}
+				}
+
+				queueFetchedRemote := func(parent *plugin.Category, rp model.RemotePlugin, depth int, mergeLocalsIntoParent bool, useVisited bool) {
+					if useVisited {
+						key := strings.ToLower(rp.OwnerRepo)
+						rootMu.Lock()
+						if visited[key] {
+							rootMu.Unlock()
+							return
+						}
+						visited[key] = true
+						rootMu.Unlock()
+					}
+
+					if depth+1 > maxDepth {
+						// Per design spec §Recursion Semantics: simply stop
+						// walking past this plugin. No placeholder Category.
+						return
+					}
+
+					dir, ferr := f.Materialize(gctx, remoteParsedSource(rp))
+					if ferr != nil {
+						attachCategory(parent, &plugin.Category{
+							PluginName: rp.Name,
+							OwnerRepo:  rp.OwnerRepo,
+							FetchOK:    false,
+							FetchErr:   "unable to fetch",
+						})
+						return
+					}
+					dir, ferr = remoteScanDir(dir, rp)
+					if ferr != nil {
+						attachCategory(parent, &plugin.Category{
+							PluginName: rp.Name,
+							OwnerRepo:  rp.OwnerRepo,
+							FetchOK:    false,
+							FetchErr:   "unable to fetch",
+						})
+						return
+					}
+
+					if mergeLocalsIntoParent {
+						if skill, ok := rootSkillInDir(dir, rp.Name); ok {
+							rootMu.Lock()
+							parent.Skills = dedupSkillsByName(append(parent.Skills, skill))
+							rootMu.Unlock()
+						}
+						return
+					}
+
+					placeholder := &plugin.Category{
+						PluginName: rp.Name,
+						OwnerRepo:  rp.OwnerRepo,
+						FetchOK:    true,
+					}
+					attachCategory(parent, placeholder)
+
+					nextMu.Lock()
+					queue = append(queue, queueEntry{parent: placeholder, dir: dir, depth: depth + 1})
+					nextMu.Unlock()
+				}
+
 				// A local plugin whose base IS the scanned dir is the repo's
 				// own root plugin. When we reached this dir by fetching a
 				// remote placeholder (n.parent != nil), that root plugin and
@@ -88,95 +160,34 @@ func Walk(ctx context.Context, f plugin.Fetcher, root plugin.ParsedSource, maxDe
 						n.parent.Skills = dedupSkillsByName(append(n.parent.Skills, lp.Skills...))
 						n.parent.Subagents = dedupSubagentsByName(append(n.parent.Subagents, lp.Subagents...))
 						rootMu.Unlock()
+						if !n.skipRemoteSkills {
+							for _, rp := range lp.RemoteSkills {
+								queueFetchedRemote(n.parent, rp, n.depth, true, false)
+							}
+						}
 						continue
 					}
 					c := &plugin.Category{PluginName: lp.Name, FetchOK: true}
 					c.Skills = dedupSkillsByName(lp.Skills)
 					c.Subagents = dedupSubagentsByName(lp.Subagents)
-					rootMu.Lock()
-					if n.parent == nil {
-						cat.Roots = append(cat.Roots, c)
-					} else {
-						n.parent.Children = append(n.parent.Children, c)
-					}
-					rootMu.Unlock()
+					attachCategory(n.parent, c)
 					// Enqueue the local plugin's dir for further BFS so its own
 					// marketplace.json / plugin.json / skill.json gets scanned (handles
 					// nested marketplaces like VoltAgent/awesome-claude-code-subagents
 					// whose marketplace.json declares sub-plugins in sub-dirs).
 					if n.depth+1 <= maxDepth {
 						nextMu.Lock()
-						queue = append(queue, queueEntry{parent: c, dir: lp.Base, depth: n.depth + 1})
+						queue = append(queue, queueEntry{parent: c, dir: lp.Base, depth: n.depth + 1, skipRemoteSkills: true})
 						nextMu.Unlock()
+					}
+					for _, rp := range lp.RemoteSkills {
+						queueFetchedRemote(c, rp, n.depth, true, false)
 					}
 				}
 
 				// Remote plugins: visit-gate, depth-gate, then fetch.
 				for _, rp := range parsed.Remotes {
-					key := strings.ToLower(rp.OwnerRepo)
-
-					rootMu.Lock()
-					if visited[key] {
-						rootMu.Unlock()
-						continue
-					}
-					visited[key] = true
-					rootMu.Unlock()
-
-					if n.depth+1 > maxDepth {
-						// Per design spec §Recursion Semantics: simply stop
-						// walking past this plugin. No placeholder Category.
-						continue
-					}
-
-					srcURL := rp.URL
-					if srcURL == "" {
-						srcURL = "https://github.com/" + rp.OwnerRepo + ".git"
-					}
-					src := plugin.ParsedSource{
-						Type: plugin.GitHub,
-						URL:  srcURL,
-						Ref:  rp.Ref,
-					}
-
-					dir, ferr := f.Materialize(gctx, src)
-					if ferr != nil {
-						rootMu.Lock()
-						failed := &plugin.Category{
-							PluginName: rp.Name,
-							OwnerRepo:  rp.OwnerRepo,
-							FetchOK:    false,
-							FetchErr:   "unable to fetch",
-						}
-						if n.parent == nil {
-							cat.Roots = append(cat.Roots, failed)
-						} else {
-							n.parent.Children = append(n.parent.Children, failed)
-						}
-						rootMu.Unlock()
-						continue
-					}
-
-					// Successful fetch: surface the plugin as a Category
-					// placeholder under its parent (whose Children will be
-					// filled at the next BFS level once we scan its dir)
-					// and enqueue the fetched dir for further discovery.
-					placeholder := &plugin.Category{
-						PluginName: rp.Name,
-						OwnerRepo:  rp.OwnerRepo,
-						FetchOK:    true,
-					}
-					rootMu.Lock()
-					if n.parent == nil {
-						cat.Roots = append(cat.Roots, placeholder)
-					} else {
-						n.parent.Children = append(n.parent.Children, placeholder)
-					}
-					rootMu.Unlock()
-
-					nextMu.Lock()
-					queue = append(queue, queueEntry{parent: placeholder, dir: dir, depth: n.depth + 1})
-					nextMu.Unlock()
+					queueFetchedRemote(n.parent, rp, n.depth, false, true)
 				}
 				return nil
 			})
@@ -187,6 +198,48 @@ func Walk(ctx context.Context, f plugin.Fetcher, root plugin.ParsedSource, maxDe
 	}
 
 	return cat, nil
+}
+
+func rootSkillInDir(dir, name string) (model.Skill, bool) {
+	info, err := os.Stat(filepath.Join(dir, "SKILL.md"))
+	if err != nil || info.IsDir() {
+		return model.Skill{}, false
+	}
+	if name == "" {
+		name = filepath.Base(dir)
+	}
+	return model.Skill{
+		Name:        name,
+		Path:        dir,
+		Description: model.ReadDescription(filepath.Join(dir, "SKILL.md")),
+	}, true
+}
+
+func remoteParsedSource(rp model.RemotePlugin) plugin.ParsedSource {
+	srcURL := rp.URL
+	if srcURL == "" {
+		srcURL = "https://github.com/" + rp.OwnerRepo + ".git"
+	}
+	return plugin.ParsedSource{
+		Type: plugin.GitHub,
+		URL:  srcURL,
+		Ref:  rp.Ref,
+	}
+}
+
+func remoteScanDir(dir string, rp model.RemotePlugin) (string, error) {
+	if rp.Subdir == "" {
+		return dir, nil
+	}
+	candidate := filepath.Join(dir, rp.Subdir)
+	rel, err := filepath.Rel(dir, candidate)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("remote subdir %q escapes fetched repo", rp.Subdir)
+	}
+	return candidate, nil
 }
 
 // dedupSkillsByName returns a slice with the first occurrence of each

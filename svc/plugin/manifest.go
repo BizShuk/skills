@@ -101,11 +101,11 @@ func dedupeLocalsByBase(locals []model.LocalPlugin) []model.LocalPlugin {
 
 // marketplacePlugin describes one entry under the marketplace's `plugins[]`.
 type marketplacePlugin struct {
-	Name           string          `json:"name"`
-	Source         json.RawMessage `json:"source"` // string | remote-object
-	Skills         []string        `json:"skills"`
-	Agents         []string        `json:"agents"`
-	TopLevelAgents bool            `json:"topLevelAgents"`
+	Name           string            `json:"name"`
+	Source         json.RawMessage   `json:"source"` // string | remote-object
+	Skills         []json.RawMessage `json:"skills"`
+	Agents         []string          `json:"agents"`
+	TopLevelAgents bool              `json:"topLevelAgents"`
 }
 
 type marketplaceManifest struct {
@@ -116,10 +116,18 @@ type marketplaceManifest struct {
 }
 
 type pluginManifest struct {
-	Name           string   `json:"name"`
-	Skills         []string `json:"skills"`
-	Agents         []string `json:"agents"`
-	TopLevelAgents bool     `json:"topLevelAgents"`
+	Name           string
+	SkillPaths     []string
+	RemoteSkills   []model.RemotePlugin
+	Agents         []string
+	TopLevelAgents bool
+}
+
+type rawPluginManifest struct {
+	Name           string            `json:"name"`
+	Skills         []json.RawMessage `json:"skills"`
+	Agents         []string          `json:"agents"`
+	TopLevelAgents bool              `json:"topLevelAgents"`
 }
 
 // scanMarketplace reads `<base>/.claude-plugin/marketplace.json` (if present)
@@ -172,11 +180,18 @@ func scanMarketplace(base string, out *model.Parsed) error {
 		if !isContainedIn(pluginBase, base) {
 			continue
 		}
-		skillPaths := append([]string(nil), p.Skills...)
+		skillPaths, remoteSkills := parseManifestSkillEntries(p.Skills)
 		if mf, ok := readPluginManifest(pluginBase); ok {
-			skillPaths = append(skillPaths, mf.Skills...)
+			skillPaths = append(skillPaths, mf.SkillPaths...)
+			remoteSkills = append(remoteSkills, mf.RemoteSkills...)
 		}
-		lp := model.LocalPlugin{Name: p.Name, Base: pluginBase, TopLevelAgents: p.TopLevelAgents, AgentPaths: p.Agents}
+		lp := model.LocalPlugin{
+			Name:           p.Name,
+			Base:           pluginBase,
+			TopLevelAgents: p.TopLevelAgents,
+			AgentPaths:     p.Agents,
+			RemoteSkills:   remoteSkills,
+		}
 		scanSkills(base, &lp, skillPaths)
 		out.Locals = append(out.Locals, lp)
 	}
@@ -190,8 +205,14 @@ func scanPluginAtBase(base string, out *model.Parsed) error {
 	if !ok {
 		return nil
 	}
-	lp := model.LocalPlugin{Name: mf.Name, Base: base, TopLevelAgents: mf.TopLevelAgents, AgentPaths: mf.Agents}
-	scanSkills(base, &lp, mf.Skills)
+	lp := model.LocalPlugin{
+		Name:           mf.Name,
+		Base:           base,
+		TopLevelAgents: mf.TopLevelAgents,
+		AgentPaths:     mf.Agents,
+		RemoteSkills:   mf.RemoteSkills,
+	}
+	scanSkills(base, &lp, mf.SkillPaths)
 	out.Locals = append(out.Locals, lp)
 	return nil
 }
@@ -201,11 +222,108 @@ func readPluginManifest(base string) (pluginManifest, bool) {
 	if err != nil {
 		return pluginManifest{}, false
 	}
-	var mf pluginManifest
-	if err := json.Unmarshal(data, &mf); err != nil || mf.Name == "" {
+	var raw rawPluginManifest
+	if err := json.Unmarshal(data, &raw); err != nil || raw.Name == "" {
 		return pluginManifest{}, false
 	}
-	return mf, true
+	skillPaths, remoteSkills := parseManifestSkillEntries(raw.Skills)
+	return pluginManifest{
+		Name:           raw.Name,
+		SkillPaths:     skillPaths,
+		RemoteSkills:   remoteSkills,
+		Agents:         raw.Agents,
+		TopLevelAgents: raw.TopLevelAgents,
+	}, true
+}
+
+func parseManifestSkillEntries(entries []json.RawMessage) ([]string, []model.RemotePlugin) {
+	var paths []string
+	var remotes []model.RemotePlugin
+	for _, entry := range entries {
+		var path string
+		if err := json.Unmarshal(entry, &path); err == nil {
+			path = strings.TrimSpace(path)
+			if path != "" {
+				if rp, ok := parseRemoteSkillShorthand(path); ok {
+					remotes = append(remotes, rp)
+				} else {
+					paths = append(paths, path)
+				}
+			}
+			continue
+		}
+
+		var obj map[string]any
+		if err := json.Unmarshal(entry, &obj); err != nil || len(obj) == 0 {
+			continue
+		}
+		name, _ := obj["name"].(string)
+		name = strings.TrimSpace(name)
+
+		sourceObj := obj
+		if nested, ok := obj["source"].(map[string]any); ok {
+			sourceObj = nested
+		}
+		if name == "" {
+			name = inferRemoteSkillName(sourceObj)
+		}
+		if name == "" {
+			continue
+		}
+		if rp, ok := classifyRemote(name, sourceObj); ok {
+			remotes = append(remotes, rp)
+		}
+	}
+	return paths, remotes
+}
+
+func parseRemoteSkillShorthand(raw string) (model.RemotePlugin, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" ||
+		strings.HasPrefix(raw, "./") ||
+		strings.HasPrefix(raw, "../") ||
+		filepath.IsAbs(raw) ||
+		strings.Contains(raw, "://") {
+		return model.RemotePlugin{}, false
+	}
+	raw = strings.TrimPrefix(raw, "github:")
+	source, ref, _ := strings.Cut(raw, "#")
+	ownerRepo := normalizeOwnerRepo(source)
+	parts := strings.Split(ownerRepo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return model.RemotePlugin{}, false
+	}
+	return model.RemotePlugin{
+		Name:      parts[1],
+		OwnerRepo: ownerRepo,
+		URL:       ghURL(parts[0], parts[1]),
+		Ref:       ref,
+	}, true
+}
+
+func inferRemoteSkillName(obj map[string]any) string {
+	if repo, _ := obj["repo"].(string); repo != "" {
+		return lastPathSegment(strings.TrimSuffix(repo, ".git"))
+	}
+	if urlStr, _ := obj["url"].(string); urlStr != "" {
+		ownerRepo := deriveOwnerRepoFromURL(urlStr)
+		if ownerRepo != "" {
+			return lastPathSegment(ownerRepo)
+		}
+		return lastPathSegment(strings.TrimSuffix(urlStr, ".git"))
+	}
+	return ""
+}
+
+func lastPathSegment(raw string) string {
+	raw = strings.Trim(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return ""
+	}
+	if i := strings.LastIndex(raw, "/"); i >= 0 {
+		return raw[i+1:]
+	}
+	return raw
 }
 
 // classifyRemote maps the object form of `source` to a model.RemotePlugin.

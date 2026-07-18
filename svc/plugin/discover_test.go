@@ -369,3 +369,133 @@ func TestWalk_DedupesSkillsByName(t *testing.T) {
 	assert.Equal(t, 1, count,
 		"apple-calendar must appear exactly once even though it exists at two physical paths")
 }
+
+// TestWalk_PluginJSONRemoteSkillMergedIntoPluginSkills verifies that a
+// plugin.json "skills" array object is treated as a remote skill source. The
+// fetched skill must be merged into the declaring plugin's skill list, not
+// rendered as a sibling or child plugin category.
+func TestWalk_PluginJSONRemoteSkillMergedIntoPluginSkills(t *testing.T) {
+	remoteRepo := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(remoteRepo, "SKILL.md"),
+		[]byte("# Remote Writer\nWrites remotely."), 0o644))
+
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{
+		"name": "toolbox",
+		"skills": [
+			{
+				"name": "remote-writer",
+				"source": { "source": "github", "repo": "acme/remote-writer", "ref": "v1" }
+			}
+		]
+	}`), 0o644))
+
+	cat, err := utils.Walk(
+		context.Background(),
+		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1)
+	toolbox := cat.Roots[0]
+	assert.Equal(t, "toolbox", toolbox.PluginName)
+	assert.Empty(t, toolbox.Children, "remote skill should merge into the plugin, not render as a child")
+	require.Len(t, toolbox.Skills, 1)
+	assert.Equal(t, "remote-writer", toolbox.Skills[0].Name)
+	assert.Equal(t, remoteRepo, toolbox.Skills[0].Path)
+}
+
+// TestWalk_PluginJSONRemoteSkillShorthand verifies that plugin.json can
+// declare a remote GitHub skill with the compact "owner/repo" string form.
+func TestWalk_PluginJSONRemoteSkillShorthand(t *testing.T) {
+	remoteRepo := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(remoteRepo, "SKILL.md"),
+		[]byte("# Remote Writer\nWrites remotely."), 0o644))
+
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{
+		"name": "toolbox",
+		"skills": ["acme/remote-writer"]
+	}`), 0o644))
+
+	cat, err := utils.Walk(
+		context.Background(),
+		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1)
+	toolbox := cat.Roots[0]
+	require.Len(t, toolbox.Skills, 1)
+	assert.Equal(t, "remote-writer", toolbox.Skills[0].Name)
+	assert.Equal(t, remoteRepo, toolbox.Skills[0].Path)
+}
+
+// TestWalk_PluginJSONRemoteSkillShorthandIgnoresSkillsFolder verifies that a
+// remote entry in plugin.json "skills" is a direct skill repo. Its own
+// skills/<name>/SKILL.md collection is intentionally ignored.
+func TestWalk_PluginJSONRemoteSkillShorthandIgnoresSkillsFolder(t *testing.T) {
+	remoteRepo := t.TempDir()
+	nestedSkillDir := filepath.Join(remoteRepo, "skills", "nested-writer")
+	require.NoError(t, os.MkdirAll(nestedSkillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedSkillDir, "SKILL.md"),
+		[]byte("# Nested Writer\nMust be ignored."), 0o644))
+
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{
+		"name": "toolbox",
+		"skills": ["acme/remote-writer"]
+	}`), 0o644))
+
+	cat, err := utils.Walk(
+		context.Background(),
+		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1)
+	assert.Empty(t, cat.Roots[0].Skills)
+}
+
+// TestWalk_PluginJSONRemoteSkillShorthandRootSkill verifies the common
+// single-skill repository layout where the fetched repo contains SKILL.md at
+// its root instead of under skills/<name>/SKILL.md.
+func TestWalk_PluginJSONRemoteSkillShorthandRootSkill(t *testing.T) {
+	remoteRepo := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(remoteRepo, "SKILL.md"),
+		[]byte("# Game Studio\nBuild game prototypes."), 0o644))
+
+	root := t.TempDir()
+	pluginDir := filepath.Join(root, ".claude-plugin")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{
+		"name": "toolbox",
+		"skills": ["guangyuspace/codex-gamestudio-skill"]
+	}`), 0o644))
+
+	cat, err := utils.Walk(
+		context.Background(),
+		fakeFetcher{repos: map[string]string{"guangyuspace/codex-gamestudio-skill": remoteRepo}},
+		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		3,
+	)
+	require.NoError(t, err)
+
+	require.Len(t, cat.Roots, 1)
+	toolbox := cat.Roots[0]
+	require.Len(t, toolbox.Skills, 1)
+	assert.Equal(t, "codex-gamestudio-skill", toolbox.Skills[0].Name)
+	assert.Equal(t, remoteRepo, toolbox.Skills[0].Path)
+}
