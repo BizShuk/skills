@@ -789,7 +789,7 @@ Do not stage the file because it contained user changes before this task. Preser
 go test ./... -count=1
 go test -race ./svc/session -count=1
 go vet ./...
-go build -o /tmp/skills-session ./cmd/skills
+go build -o /tmp/skills-session .
 git diff --check
 ```
 

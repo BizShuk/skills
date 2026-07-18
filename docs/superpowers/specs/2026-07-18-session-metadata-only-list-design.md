@@ -86,6 +86,8 @@ wrapped error。schema 不含必要欄位時視為不支援的 index，回傳空
 JSONL discovery。
 
 SQLite connection 必須在 query 後關閉；list path 不更新 database，也不建立 table。
+`mode=ro` 表示不得有 logical SQL/database/table writes；一般 live-WAL locking/read-mark
+coordination 可接受，且對持續變動的 index 不得使用 `immutable=1`。
 
 ### Grok
 
@@ -151,7 +153,7 @@ filesystem/index 時間只用於排序與 row 顯示；detail 不需要回頭更
 - `go test ./... -count=1`
 - `go test -race ./svc/session -count=1`
 - `go vet ./...`
-- `go build -o /tmp/skills-session ./cmd/skills`
+- `go build -o /tmp/skills-session .`
 - 在本 repo 實測 `skills session` list latency，目標小於 `1s`。
 
 ## 文件同步

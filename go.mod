@@ -12,6 +12,7 @@ require (
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.21.0
+	modernc.org/sqlite v1.54.0
 )
 
 require (
@@ -66,5 +67,4 @@ require (
 	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.54.0 // indirect
 )

@@ -32,7 +32,18 @@ func TestDiscoverGrokReadsOnlyCurrentProjectSessionDirectories(t *testing.T) {
 	assert.Equal(t, "session-a", got[0].ID)
 	assert.Equal(t, "grok", got[0].Agent)
 	assert.Equal(t, sessionPath, got[0].Path)
+	assert.Equal(t, wantTime, got[0].StartedAt)
 	assert.Equal(t, wantTime, got[0].LastActivity)
+}
+
+func TestDiscoverGrokMissingCurrentProjectReturnsEmpty(t *testing.T) {
+	root := t.TempDir()
+	cwd := filepath.Join(t.TempDir(), "workspace")
+
+	got, err := discoverGrok(root, cwd)
+
+	require.NoError(t, err)
+	assert.Empty(t, got)
 }
 
 func TestLoadGrokDetailFiltersPromptHistory(t *testing.T) {
