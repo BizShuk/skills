@@ -44,8 +44,12 @@ skills add owner/repo#v2
 skills session
 ```
 
-命令會讀取 `svc/agent/providers/` 的 `sessionDirs`，只列出 session
-metadata 明確指向目前工作目錄的項目；缺少 session 目錄時會顯示空結果。
+命令會讀取 `svc/agent/providers/` 的 session metadata source，只列出 metadata
+明確指向目前工作目錄的項目。列表階段不開啟或解析 transcript；Claude 由目前
+project folder 的 session 檔名列出，Codex 讀取 `state_5.sqlite` thread index，
+Grok 讀取目前 project folder 的 session directories。其他 provider 在具備
+project-scoped path 或外部 metadata index 前不顯示。缺少 metadata source 時會
+顯示空結果。
 
 有 session 時會進入互動式 TUI。列表上方會以 tab 分組顯示有 session 的 agents：使用 `←`/`→` 切換 agent，`↑`/`↓` 移動該 agent 的 session，按 `Enter` 或滑鼠左鍵開啟 detail；detail 畫面按 `←` 或 `Esc` 返回列表，並可用 `↑`/`↓`、`PageUp`/`PageDown` 捲動 timeline。列表 row 會先顯示 `YYYY-MM-DD HH:MM:SS`，再顯示 session ID；每個 agent 會保留自己的選取位置。完整 transcript 採 lazy loading，只在開啟選取的 session 時讀取。
 
