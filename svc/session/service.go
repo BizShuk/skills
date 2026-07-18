@@ -4,10 +4,18 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/bizshuk/skills/model"
 	"github.com/bizshuk/skills/svc/agent"
 )
+
+type providerDiscoverer func(agentName, root, cwd string) ([]model.AgentSession, error)
+
+type agentScanResult struct {
+	items []model.AgentSession
+	err   error
+}
 
 // List discovers sessions whose recorded working directory matches cwd.
 func List(cwd string) ([]model.AgentSession, error) {
@@ -15,24 +23,31 @@ func List(cwd string) ([]model.AgentSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	return listAgents(agent.Agents(), normalizedCWD, discoverProvider)
+}
+
+func listAgents(configured []agent.Agent, cwd string, discover providerDiscoverer) ([]model.AgentSession, error) {
+	results := make([]agentScanResult, len(configured))
+	var wait sync.WaitGroup
+	wait.Add(len(configured))
+	for index, configuredAgent := range configured {
+		go func(index int, configuredAgent agent.Agent) {
+			defer wait.Done()
+			results[index].items, results[index].err = scanAgent(configuredAgent, cwd, discover)
+		}(index, configuredAgent)
+	}
+	wait.Wait()
 
 	byKey := make(map[string]model.AgentSession)
-	for _, configured := range agent.Agents() {
-		agentName := string(configured.Type)
-		for _, root := range configured.SessionDirs {
-			if strings.TrimSpace(root) == "" {
-				continue
-			}
-			items, err := discoverProvider(agentName, root, normalizedCWD)
-			if err != nil {
-				return nil, fmt.Errorf("session: discover %s at %s: %w", agentName, root, err)
-			}
-			for _, item := range items {
-				key := item.Agent + "\x00" + item.ID
-				previous, exists := byKey[key]
-				if !exists || item.LastActivity.After(previous.LastActivity) {
-					byKey[key] = item
-				}
+	for _, result := range results {
+		if result.err != nil {
+			return nil, result.err
+		}
+		for _, item := range result.items {
+			key := item.Agent + "\x00" + item.ID
+			previous, exists := byKey[key]
+			if !exists || item.LastActivity.After(previous.LastActivity) {
+				byKey[key] = item
 			}
 		}
 	}
@@ -50,6 +65,22 @@ func List(cwd string) ([]model.AgentSession, error) {
 		}
 		return sessions[i].ID < sessions[j].ID
 	})
+	return sessions, nil
+}
+
+func scanAgent(configured agent.Agent, cwd string, discover providerDiscoverer) ([]model.AgentSession, error) {
+	agentName := string(configured.Type)
+	var sessions []model.AgentSession
+	for _, root := range configured.SessionDirs {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		items, err := discover(agentName, root, cwd)
+		if err != nil {
+			return nil, fmt.Errorf("session: discover %s at %s: %w", agentName, root, err)
+		}
+		sessions = append(sessions, items...)
+	}
 	return sessions, nil
 }
 
