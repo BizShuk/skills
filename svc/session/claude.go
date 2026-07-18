@@ -1,6 +1,9 @@
 package session
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -9,25 +12,46 @@ import (
 )
 
 func discoverClaude(root, cwd string) ([]model.AgentSession, error) {
-	sessions := make([]model.AgentSession, 0)
-	err := walkJSONLFiles(root, func(path string) error {
-		var metadata sessionMetadata
-		err := scanJSONL(path, func(record map[string]any) {
-			if id, ok := record["sessionId"].(string); ok {
-				metadata.addID(id)
-			}
-			metadata.addWorkingDirectories(workingDirectories(record), cwd)
-			metadata.addTimestamp(record["timestamp"])
-		})
+	projectPath := filepath.Join(root, claudeProjectKey(cwd))
+	entries, err := os.ReadDir(projectPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return []model.AgentSession{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	sessions := make([]model.AgentSession, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
+			continue
+		}
+		info, err := entry.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
-			return nil
+			return nil, err
 		}
-		if session, ok := metadata.session("claude-code", path, ""); ok {
-			sessions = append(sessions, session)
+		if !info.Mode().IsRegular() {
+			continue
 		}
-		return nil
-	})
-	return sessions, err
+
+		path := filepath.Join(projectPath, entry.Name())
+		activity := info.ModTime()
+		sessions = append(sessions, model.AgentSession{
+			Agent:        "claude-code",
+			ID:           strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
+			StartedAt:    activity,
+			LastActivity: activity,
+			Path:         path,
+		})
+	}
+	return sessions, nil
+}
+
+func claudeProjectKey(cwd string) string {
+	return strings.ReplaceAll(filepath.ToSlash(cwd), "/", "-")
 }
 
 func loadClaudeDetail(item model.AgentSession) (model.AgentSessionDetail, error) {

@@ -3,6 +3,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,35 +12,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiscoverClaudeFiltersByCWDAndIncludesSubagents(t *testing.T) {
+func TestDiscoverClaudeReadsOnlyCurrentProjectSessionEntries(t *testing.T) {
 	root := t.TempDir()
-	cwd := filepath.Join(root, "workspace")
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "project", "subagents"), 0o755))
+	cwd := filepath.Join(t.TempDir(), "workspace")
+	projectKey := strings.ReplaceAll(filepath.ToSlash(cwd), "/", "-")
+	project := filepath.Join(root, projectKey)
+	otherProject := filepath.Join(root, "-other-project")
+	require.NoError(t, os.MkdirAll(filepath.Join(project, "session-a", "subagents"), 0o755))
+	require.NoError(t, os.MkdirAll(otherProject, 0o755))
 
-	writeJSONL(t, filepath.Join(root, "project", "parent.jsonl"),
-		`{"sessionId":"parent","cwd":"`+cwd+`","timestamp":"2026-07-18T08:00:00Z"}`,
-		`not-json`,
-		`{"sessionId":"parent","cwd":"`+cwd+`","timestamp":"2026-07-18T08:05:00Z"}`,
+	sessionPath := filepath.Join(project, "session-a.jsonl")
+	writeJSONL(t, sessionPath, `not-session-json`)
+	writeJSONL(t, filepath.Join(project, "session-a", "subagents", "agent-child.jsonl"),
+		`{"sessionId":"child","cwd":"`+cwd+`"}`,
 	)
-	writeJSONL(t, filepath.Join(root, "project", "other.jsonl"),
-		`{"sessionId":"other","cwd":"/other","timestamp":"2026-07-18T08:10:00Z"}`,
+	writeJSONL(t, filepath.Join(otherProject, "other.jsonl"),
+		`{"sessionId":"other","cwd":"`+cwd+`"}`,
 	)
-	writeJSONL(t, filepath.Join(root, "project", "subagents", "child.jsonl"),
-		`{"sessionId":"child","cwd":"`+cwd+`","timestamp":"2026-07-18T08:03:00Z"}`,
-	)
+
+	wantTime := time.Date(2026, 7, 18, 8, 5, 0, 0, time.Local)
+	require.NoError(t, os.Chtimes(sessionPath, wantTime, wantTime))
 
 	got, err := discoverClaude(root, cwd)
 	require.NoError(t, err)
-	require.Len(t, got, 2)
-	assert.ElementsMatch(t, []string{"child", "parent"}, []string{got[0].ID, got[1].ID})
-	startedByID := map[string]time.Time{}
-	lastByID := map[string]time.Time{}
-	for _, item := range got {
-		startedByID[item.ID] = item.StartedAt
-		lastByID[item.ID] = item.LastActivity
-	}
-	assert.Equal(t, time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC), startedByID["parent"])
-	assert.Equal(t, time.Date(2026, 7, 18, 8, 5, 0, 0, time.UTC), lastByID["parent"])
+	require.Len(t, got, 1)
+	assert.Equal(t, "session-a", got[0].ID)
+	assert.Equal(t, "claude-code", got[0].Agent)
+	assert.Equal(t, sessionPath, got[0].Path)
+	assert.Equal(t, wantTime, got[0].StartedAt)
+	assert.Equal(t, wantTime, got[0].LastActivity)
 }
 
 func TestLoadClaudeDetailNormalizesTimeline(t *testing.T) {
