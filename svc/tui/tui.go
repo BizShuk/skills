@@ -73,11 +73,33 @@ const (
 	phaseLevel
 )
 
-// agentRow is one agent line in the agent-selection phase.
+// agentRow is one line in the agent-selection phase. When multiple agents
+// share the same install location (ProjectSkillsDir + ProjectAgentsDir),
+// they're collapsed into a single row so the user toggles them as one —
+// checking the row installs into the shared directory for every member.
+// Members of a singleton row are stored in a 1-element slice.
 type agentRow struct {
-	agent    agent.Agent
+	agents   []agent.Agent
 	checked  bool
-	detected bool // true if agent.Detect() found this agent's folder on disk
+	detected bool // true if any member's DetectDir exists on disk
+}
+
+// displayName returns the human-readable label for this row. Singleton
+// rows use the agent's DisplayName directly; multi-agent groups show the
+// first member followed by the rest joined in parens, e.g.
+// "Antigravity (Antigravity CLI, Codex, OpenCode)".
+func (r agentRow) displayName() string {
+	if len(r.agents) == 0 {
+		return ""
+	}
+	if len(r.agents) == 1 {
+		return r.agents[0].DisplayName
+	}
+	names := make([]string, len(r.agents))
+	for i, a := range r.agents {
+		names[i] = a.DisplayName
+	}
+	return names[0] + " (" + strings.Join(names[1:], ", ") + ")"
 }
 
 // Model is the bubbletea program state. Cursor, rows, fold map, search
@@ -177,24 +199,49 @@ var defaultCheckedAgentTypes = map[agent.AgentType]bool{
 	"antigravity-cli": true,
 }
 
-// makeAgents builds the agent row list. detected marks whether
-// agent.Detect() found this agent's folder on disk (used to render the
-// "(detected)" suffix); checked additionally requires the agent's type to
-// be one of defaultCheckedAgentTypes.
+// makeAgents builds the agent row list, grouping agents that share the
+// same install location so the user sees one checkbox per directory
+// instead of one per agent type. detected marks whether any member's
+// DetectDir exists on disk (used for the "(detected)" suffix); checked
+// additionally requires at least one member to be both a default-checked
+// type and detected. Input order is preserved across groups; within a
+// group, members keep the order they appeared in the input slice.
 func makeAgents(agents []agent.Agent) []agentRow {
 	detected := make(map[agent.AgentType]bool)
 	for _, d := range agent.Detect() {
 		detected[d.Type] = true
 	}
 
-	rows := make([]agentRow, len(agents))
-	for i, a := range agents {
-		isDetected := detected[a.Type]
-		rows[i] = agentRow{
-			agent:    a,
-			detected: isDetected,
-			checked:  isDetected && defaultCheckedAgentTypes[a.Type],
+	// Bucket agents by (skills dir, agents dir) while preserving the
+	// input order across groups for deterministic rendering.
+	groups := make(map[string][]agent.Agent)
+	order := make([]string, 0, len(agents))
+	for _, a := range agents {
+		key := a.ProjectSkillsDir + "\x00" + a.ProjectAgentsDir
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
 		}
+		groups[key] = append(groups[key], a)
+	}
+
+	rows := make([]agentRow, 0, len(order))
+	for _, key := range order {
+		members := groups[key]
+		isDetected := false
+		isDefaultChecked := false
+		for _, a := range members {
+			if detected[a.Type] {
+				isDetected = true
+			}
+			if defaultCheckedAgentTypes[a.Type] && detected[a.Type] {
+				isDefaultChecked = true
+			}
+		}
+		rows = append(rows, agentRow{
+			agents:   members,
+			detected: isDetected,
+			checked:  isDefaultChecked,
+		})
 	}
 	return rows
 }
@@ -888,9 +935,11 @@ func (m Model) Selection() agent.Selection {
 		}
 	}
 	agentTypes := make([]agent.AgentType, 0)
-	for _, a := range m.agents {
-		if a.checked {
-			agentTypes = append(agentTypes, a.agent.Type)
+	for _, row := range m.agents {
+		if row.checked {
+			for _, a := range row.agents {
+				agentTypes = append(agentTypes, a.Type)
+			}
 		}
 	}
 	return agent.Selection{SkillPaths: paths, SubagentPaths: saPaths, AgentTypes: agentTypes, Global: m.global}
@@ -927,7 +976,7 @@ func (m Model) viewAgents() string {
 		if a.checked {
 			box = checkedStyle.Render(glyphChecked)
 		}
-		text := a.agent.DisplayName
+		text := a.displayName()
 		if a.detected {
 			text += "  (detected)"
 		}

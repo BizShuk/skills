@@ -503,11 +503,16 @@ func TestCursorStaysVisible(t *testing.T) {
 // tests). makeAgents computes checked/detected via agent.Detect() against
 // the real $HOME rather than these DetectDir values, so tests that DO care
 // about checked state must control $HOME themselves (see
-// TestAgentPhaseSpaceTogglesAgent).
+// TestAgentPhaseSpaceTogglesAgent). Project paths are explicit and
+// distinct so makeAgents keeps them as separate rows.
 func twoAgents() []agent.Agent {
 	return []agent.Agent{
-		{Type: "claude-code", DisplayName: "Claude Code", DetectDir: "/home/user/.claude"},
-		{Type: "codex", DisplayName: "Codex", DetectDir: ""},
+		{Type: "claude-code", DisplayName: "Claude Code",
+			DetectDir: "/home/user/.claude",
+			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents"},
+		{Type: "codex", DisplayName: "Codex",
+			DetectDir: "",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
 	}
 }
 
@@ -635,8 +640,8 @@ func TestMakeAgentsSkipsUndetectedDefaultAgent(t *testing.T) {
 	})
 
 	for _, r := range rows {
-		assert.False(t, r.checked, "%s should start unchecked: default type but folder not detected", r.agent.Type)
-		assert.False(t, r.detected, "%s should not be marked detected: folder doesn't exist", r.agent.Type)
+		assert.False(t, r.checked, "%s should start unchecked: default type but folder not detected", r.agents[0].Type)
+		assert.False(t, r.detected, "%s should not be marked detected: folder doesn't exist", r.agents[0].Type)
 	}
 }
 
@@ -656,6 +661,118 @@ func TestMakeAgentsSkipsNonDefaultDetectedAgent(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.True(t, rows[0].detected, "codex folder exists, so it should be marked detected")
 	assert.False(t, rows[0].checked, "codex is detected but not a default-checked type, so it must stay unchecked")
+}
+
+// TestMakeAgentsGroupsByInstallPath verifies the agent-row grouping
+// policy: four agents sharing (ProjectSkillsDir, ProjectAgentsDir) collapse
+// into a single row, while an agent with a distinct install path stays
+// in its own row. Groups preserve input order so the rendered list is
+// deterministic.
+func TestMakeAgentsGroupsByInstallPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // no folders detected
+
+	rows := makeAgents([]agent.Agent{
+		{Type: "antigravity", DisplayName: "Antigravity",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "antigravity-cli", DisplayName: "Antigravity CLI",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "codex", DisplayName: "Codex",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "opencode", DisplayName: "OpenCode",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "claude-code", DisplayName: "Claude Code",
+			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents"},
+	})
+
+	require.Len(t, rows, 2, "four .agents/skills agents + claude-code = two rows")
+	require.Len(t, rows[0].agents, 4, "first row bundles four .agents/skills agents")
+	require.Len(t, rows[1].agents, 1, "second row holds claude-code alone")
+
+	// Member order within the group matches the input order.
+	assert.Equal(t, agent.AgentType("antigravity"), rows[0].agents[0].Type)
+	assert.Equal(t, agent.AgentType("antigravity-cli"), rows[0].agents[1].Type)
+	assert.Equal(t, agent.AgentType("codex"), rows[0].agents[2].Type)
+	assert.Equal(t, agent.AgentType("opencode"), rows[0].agents[3].Type)
+}
+
+// TestAgentRowDisplayNameSingleton confirms a single-agent row renders as
+// just the display name (no parens — there's nothing to group with).
+func TestAgentRowDisplayNameSingleton(t *testing.T) {
+	r := agentRow{agents: []agent.Agent{
+		{Type: "claude-code", DisplayName: "Claude Code"},
+	}}
+	assert.Equal(t, "Claude Code", r.displayName())
+}
+
+// TestAgentRowDisplayNameGrouped verifies the multi-agent display format:
+// first member's name, then the rest joined in parens.
+func TestAgentRowDisplayNameGrouped(t *testing.T) {
+	r := agentRow{agents: []agent.Agent{
+		{Type: "antigravity", DisplayName: "Antigravity"},
+		{Type: "antigravity-cli", DisplayName: "Antigravity CLI"},
+		{Type: "codex", DisplayName: "Codex"},
+		{Type: "opencode", DisplayName: "OpenCode"},
+	}}
+	assert.Equal(t, "Antigravity (Antigravity CLI, Codex, OpenCode)", r.displayName())
+}
+
+// TestViewAgentPhaseRendersGroupedNamesInParens checks the rendered agent
+// list shows the grouped display name (e.g. "Antigravity (Codex, ...)")
+// rather than separate rows for each member agent.
+func TestViewAgentPhaseRendersGroupedNamesInParens(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := NewModel(sampleCatalog(), []agent.Agent{
+		{Type: "antigravity", DisplayName: "Antigravity",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "codex", DisplayName: "Codex",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "claude-code", DisplayName: "Claude Code",
+			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents"},
+	})
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter)) // -> phaseAgents
+
+	view := m1.View()
+	assert.Contains(t, view, "Antigravity (Codex)",
+		"grouped .agents/skills row must render with parens around the second member")
+	assert.Contains(t, view, "Claude Code",
+		"singleton .claude/skills row renders without parens")
+	// No row for "Codex" alone — it's bundled into the Antigravity group.
+	assert.NotContains(t, view, "Codex\n",
+		"Codex must not appear as a standalone row inside the bundled group line")
+}
+
+// TestAgentPhaseSpaceTogglesEntireGroup verifies that Space on a grouped
+// row flips every member agent into the final Selection().AgentTypes —
+// toggling the group should install for all members at once.
+func TestAgentPhaseSpaceTogglesEntireGroup(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
+	t.Setenv("HOME", home)
+
+	m := NewModel(sampleCatalog(), []agent.Agent{
+		{Type: "antigravity", DisplayName: "Antigravity",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "codex", DisplayName: "Codex",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+		{Type: "claude-code", DisplayName: "Claude Code",
+			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents"},
+	})
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter)) // -> phaseAgents
+	require.Equal(t, phaseAgents, m1.phase)
+	require.False(t, m1.agents[0].checked, "no .agents/skills folder detected, group stays unchecked")
+
+	// Cursor at row 0 (the grouped .agents/skills row); Space checks both members.
+	m2 := mustModel(t, sendKey(m1, tea.KeySpace))
+
+	got := m2.Selection().AgentTypes
+	assert.ElementsMatch(t, []agent.AgentType{"antigravity", "codex"}, got,
+		"toggling the grouped row must select both member agents")
+
+	// Second Space flips the whole group back off.
+	m3 := mustModel(t, sendKey(m2, tea.KeySpace))
+	assert.Empty(t, m3.Selection().AgentTypes,
+		"second Space on the grouped row unchecks every member")
 }
 
 // TestAllRootPluginsAreFoldedByDefault verifies the contract introduced by
