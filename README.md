@@ -71,7 +71,7 @@ project-scoped path 或外部 metadata index 前不顯示。缺少 metadata sour
 | `claude-code` | `.claude/skills` | `~/.claude/skills` | `.claude/agents` | `~/.claude/agents` | `~/.claude` 目錄存在 |
 | `antigravity` | `.agents/skills` | `~/.gemini/antigravity/skills` | `.agents/agents` | `~/.gemini/antigravity/agents` | `~/.gemini/antigravity` 目錄存在 |
 | `antigravity-cli` | `.agents/skills` | `~/.gemini/antigravity-cli/skills` | `.agents/agents` | `~/.gemini/antigravity-cli/agents` | `~/.gemini/antigravity-cli` 目錄存在 |
-| `codex` | `.agents/skills` | `~/.codex/skills` | `.agents/agents` | `~/.codex/agents` | `~/.codex` 目錄存在 |
+| `codex` | `.agents/skills` | `~/.agents/skills` | `.agents/agents` | `~/.agents/agents` | `~/.codex` 目錄存在 |
 | `opencode` | `.agents/skills` | `~/.config/opencode/skills` | `.agents/agents` | `~/.config/opencode/agents` | `~/.config/opencode` 目錄存在 |
 | `hermes-agent` | `.hermes/skills` | `~/.hermes/skills` | `.hermes/agents` | `~/.hermes/agents` | `~/.hermes` 目錄存在 |
 

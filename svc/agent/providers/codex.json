@@ -2,9 +2,9 @@
   "type": "codex",
   "displayName": "Codex",
   "projectSkillsDir": ".agents/skills",
-  "userSkillsDir": "~/.codex/skills",
+  "userSkillsDir": "~/.agents/skills",
   "projectAgentsDir": ".agents/agents",
-  "userAgentsDir": "~/.codex/agents",
+  "userAgentsDir": "~/.agents/agents",
   "detectDir": "~/.codex",
   "sessionDirs": ["~/.codex/sessions", "~/.codex/archived_sessions"],
   "sessionIndex": "~/.codex/state_5.sqlite"
