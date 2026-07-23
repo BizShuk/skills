@@ -18,6 +18,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(updateCmd())
 	root.AddCommand(removeCmd())
 	root.AddCommand(stats.StatsCmd())
+	root.AddCommand(tokenCmd())
 	root.AddCommand(sessionCmd())
 	return root
 }

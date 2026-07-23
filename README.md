@@ -126,3 +126,28 @@ antigravity (project)`）。空白鍵切換選取、Enter 確認、Esc 取消。
 | `--global`  | 只顯示全域層安裝（與 `--project` 互斥）                |
 | `--project` | 只顯示專案層安裝（與 `--global` 互斥）                  |
 | `--yes`     | 自動勾選所有符合條件的項目並跳過 y/N 確認              |
+
+## `skills token`
+
+`skills token` 回報 prompt 的 token 數。預設用本地啟發式（每 4 個 rune 算一個 token，向下取上限），
+加上 `--provider` 後改打該 provider 的 API 或本地 tokenizer 取精確值。輸出只有整數到 stdout，
+錯誤到 stderr，方便直接接到 shell 或預算檢查。
+
+```bash
+skills token "hello world"
+skills token "$(cat README.md)"
+skills token "$(< SKILL.md)"
+cat prompt.txt | skills token
+cat prompt.txt | skills token --provider claude-code
+echo "summarize this" | skills token --provider codex
+```
+
+支援的 `--provider` 值跟 `svc/agent/providers/` 內所有 provider 對應：
+
+| Provider | 計數方式 | 需要的環境變數 |
+| --- | --- | --- |
+| `claude-code` | Anthropic `POST /v1/messages/count_tokens` | `ANTHROPIC_API_KEY`（`ANTHROPIC_BASE_URL` 可選） |
+| `antigravity`, `antigravity-cli` | Gemini `countTokens` | `GEMINI_API_KEY` 或 `GOOGLE_API_KEY` |
+| `codex`, `grok`, `opencode`, `hermes-agent`, `pi` | 本地 tiktoken `o200k_base` | （無） |
+
+完整的 bash 用法範例請見 `skills token --help`。
