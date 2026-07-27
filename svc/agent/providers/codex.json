@@ -1,9 +1,9 @@
 {
   "type": "codex",
   "displayName": "Codex",
-  "projectSkillsDir": ".codex/skills",
+  "projectSkillsDir": ".agents/skills",
   "userSkillsDir": "~/.agents/skills",
-  "projectAgentsDir": ".codex/agents",
+  "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.agents/agents",
   "detectDir": "~/.codex",
   "sessionDirs": [
