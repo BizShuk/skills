@@ -5,6 +5,7 @@
   "userSkillsDir": "~/.grok/skills",
   "projectAgentsDir": ".grok/agents",
   "userAgentsDir": "~/.grok/agents",
+  "globalRulePath": "~/.grok/rules/CLAUDE.global.md",
   "detectDir": "~/.grok",
   "sessionDirs": ["~/.grok/sessions"]
 }

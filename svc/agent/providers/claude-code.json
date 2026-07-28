@@ -5,6 +5,7 @@
   "userSkillsDir": "~/.claude/skills",
   "projectAgentsDir": ".claude/agents",
   "userAgentsDir": "~/.claude/agents",
+  "globalRulePath": "~/.claude/CLAUDE.md",
   "detectDir": "~/.claude",
   "sessionDirs": ["~/.claude/projects"]
 }

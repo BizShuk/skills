@@ -37,6 +37,7 @@ type Provider struct {
 	UserSkillsDir    string   `json:"userSkillsDir"`
 	ProjectAgentsDir string   `json:"projectAgentsDir"`
 	UserAgentsDir    string   `json:"userAgentsDir"`
+	GlobalRulePath   string   `json:"globalRulePath"`
 	DetectDir        string   `json:"detectDir"`
 	SessionDirs      []string `json:"sessionDirs"`
 	SessionIndex     string   `json:"sessionIndex,omitempty"`

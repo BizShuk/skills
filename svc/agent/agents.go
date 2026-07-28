@@ -30,6 +30,7 @@ type Agent struct {
 	UserSkillsDir    string   // absolute
 	ProjectAgentsDir string   // relative to cwd when not absolute
 	UserAgentsDir    string   // absolute
+	GlobalRulePath   string   // absolute user-level rule file
 	DetectDir        string   // if this dir exists on disk, the agent is "installed"
 	SessionDirs      []string // absolute session roots after `~/` expansion
 	SessionIndex     string   // absolute metadata index after `~/` expansion
@@ -63,6 +64,7 @@ func Agents() []Agent {
 			UserSkillsDir:    expand(p.UserSkillsDir),
 			ProjectAgentsDir: p.ProjectAgentsDir,
 			UserAgentsDir:    expand(p.UserAgentsDir),
+			GlobalRulePath:   expand(p.GlobalRulePath),
 			DetectDir:        expand(p.DetectDir),
 			SessionDirs:      sessionDirs,
 			SessionIndex:     expand(p.SessionIndex),
