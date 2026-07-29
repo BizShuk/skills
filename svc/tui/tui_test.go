@@ -645,11 +645,9 @@ func TestMakeAgentsSkipsUndetectedDefaultAgent(t *testing.T) {
 	}
 }
 
-// TestMakeAgentsSkipsNonDefaultDetectedAgent verifies that an agent OUTSIDE
-// the three default-checked types (e.g. codex) stays unchecked even when
-// its folder IS detected on disk — detection alone isn't enough; the type
-// must also be in defaultCheckedAgentTypes.
-func TestMakeAgentsSkipsNonDefaultDetectedAgent(t *testing.T) {
+// TestMakeAgentsChecksAnyDetectedAgent verifies that any agent (e.g. codex)
+// starts checked whenever its folder IS detected on disk.
+func TestMakeAgentsChecksAnyDetectedAgent(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
 	t.Setenv("HOME", home)
@@ -660,7 +658,7 @@ func TestMakeAgentsSkipsNonDefaultDetectedAgent(t *testing.T) {
 
 	require.Len(t, rows, 1)
 	assert.True(t, rows[0].detected, "codex folder exists, so it should be marked detected")
-	assert.False(t, rows[0].checked, "codex is detected but not a default-checked type, so it must stay unchecked")
+	assert.True(t, rows[0].checked, "codex is detected on disk, so it must start checked")
 }
 
 // TestMakeAgentsGroupsByInstallPath verifies the agent-row grouping
@@ -746,9 +744,7 @@ func TestViewAgentPhaseRendersGroupedNamesInParens(t *testing.T) {
 // row flips every member agent into the final Selection().AgentTypes —
 // toggling the group should install for all members at once.
 func TestAgentPhaseSpaceTogglesEntireGroup(t *testing.T) {
-	home := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", t.TempDir()) // empty — no folders detected on disk
 
 	m := NewModel(sampleCatalog(), []agent.Agent{
 		{Type: "antigravity", DisplayName: "Antigravity",

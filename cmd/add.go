@@ -55,8 +55,8 @@ func addCmd() *cobra.Command {
 				targets = agent.Detect()
 			default:
 				// Interactive: show every known agent so the user can pick
-				// freely; the TUI's agent phase pre-checks only the agents
-				// it detects on disk (see tui.defaultCheckedAgentTypes).
+				// freely; the TUI's agent phase pre-checks agents that are
+				// detected on disk.
 				targets = agent.Agents()
 			}
 

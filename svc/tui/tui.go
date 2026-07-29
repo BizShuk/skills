@@ -188,24 +188,13 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 	return m
 }
 
-// defaultCheckedAgentTypes are pre-checked in the agent-selection phase, but
-// only when agent.Detect() confirms their folder actually exists on disk.
-// Every other agent type — and any of these three without a detected
-// folder — starts unchecked so a first-time user isn't surprised by
-// installs into tools they don't have set up.
-var defaultCheckedAgentTypes = map[agent.AgentType]bool{
-	"claude-code":     true,
-	"antigravity":     true,
-	"antigravity-cli": true,
-}
-
 // makeAgents builds the agent row list, grouping agents that share the
 // same install location so the user sees one checkbox per directory
 // instead of one per agent type. detected marks whether any member's
 // DetectDir exists on disk (used for the "(detected)" suffix); checked
-// additionally requires at least one member to be both a default-checked
-// type and detected. Input order is preserved across groups; within a
-// group, members keep the order they appeared in the input slice.
+// marks whether any member's DetectDir is detected on disk. Input order
+// is preserved across groups; within a group, members keep the order they
+// appeared in the input slice.
 func makeAgents(agents []agent.Agent) []agentRow {
 	detected := make(map[agent.AgentType]bool)
 	for _, d := range agent.Detect() {
@@ -228,19 +217,16 @@ func makeAgents(agents []agent.Agent) []agentRow {
 	for _, key := range order {
 		members := groups[key]
 		isDetected := false
-		isDefaultChecked := false
 		for _, a := range members {
 			if detected[a.Type] {
 				isDetected = true
-			}
-			if defaultCheckedAgentTypes[a.Type] && detected[a.Type] {
-				isDefaultChecked = true
+				break
 			}
 		}
 		rows = append(rows, agentRow{
 			agents:   members,
 			detected: isDetected,
-			checked:  isDefaultChecked,
+			checked:  isDetected,
 		})
 	}
 	return rows
