@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -196,5 +197,22 @@ func TestFormatToken(t *testing.T) {
 		if res != tc.expected {
 			t.Errorf("expected %q, got %q for %d", tc.expected, res, tc.input)
 		}
+	}
+}
+
+// TestCacheFilePathStaysAbsoluteAndIsolated guards the same invariant as
+// svc/update's storePath test: the cache must never resolve to a path
+// relative to the caller's working directory, which is what happens when the
+// app config dir comes back empty and filepath.Join silently degrades.
+func TestCacheFilePathStaysAbsoluteAndIsolated(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	got := GetCacheFilePath("2026-08-03")
+	if !filepath.IsAbs(got) {
+		t.Fatalf("GetCacheFilePath = %q — a relative path would write into the source tree", got)
+	}
+	if !strings.HasPrefix(got, tmp) {
+		t.Fatalf("GetCacheFilePath = %q, want it under the test's XDG_CONFIG_HOME %q", got, tmp)
 	}
 }

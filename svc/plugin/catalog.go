@@ -78,5 +78,3 @@ func (c *Catalog) AllSubagents() []model.Subagent {
 	}
 	return out
 }
-
-

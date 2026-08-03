@@ -7,6 +7,9 @@ out/
 # go binary clash with skills/ data dir
 /skills
 
+# per-instance data/config (symlinks to ~/.config/skills)
+tmp/
+
 # code coverage
 coverage
 *.lcov

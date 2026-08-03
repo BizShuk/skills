@@ -1,4 +1,8 @@
-package utils
+// Package discover walks a plugin source tree and builds the skill /
+// subagent catalog the TUI presents. It owns the BFS traversal, the
+// per-level parallel fetch of remote plugins, and the visited-set that
+// prevents cycles and duplicate fetches.
+package discover
 
 import (
 	"context"
@@ -11,6 +15,7 @@ import (
 	"github.com/bizshuk/skills/model"
 	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/svc/plugin"
+	"github.com/bizshuk/skills/utils"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -232,7 +237,7 @@ func rootSkillInDir(dir, name string) (model.Skill, bool) {
 	return model.Skill{
 		Name:        name,
 		Path:        dir,
-		Description: model.ReadDescription(filepath.Join(dir, "SKILL.md")),
+		Description: utils.ReadDescription(filepath.Join(dir, "SKILL.md")),
 	}, true
 }
 

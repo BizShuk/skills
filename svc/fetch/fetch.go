@@ -19,10 +19,6 @@ import (
 	"time"
 )
 
-// maxAttempts is the total number of times a download is tried before
-// giving up, per the project-wide "max retry times is 5" convention.
-const maxAttempts = 5
-
 // Fetcher turns a parsed source into a local directory path. Implementations
 // are expected to be safe for concurrent use by multiple goroutines.
 type Fetcher interface {

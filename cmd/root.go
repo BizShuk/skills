@@ -7,7 +7,6 @@
 package cmd
 
 import (
-	"github.com/bizshuk/skills/cmd/stats"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +17,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(installCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(removeCmd())
-	root.AddCommand(stats.StatsCmd())
+	root.AddCommand(statsCmd())
 	root.AddCommand(tokenCmd())
 	root.AddCommand(sessionCmd())
 	return root

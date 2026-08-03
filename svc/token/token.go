@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/bizshuk/skills/svc/agent"
+
+	gohttp "github.com/bizshuk/gosdk/http"
 )
 
 // httpDoer is the minimum surface of *http.Client the package uses.
@@ -38,9 +40,9 @@ var httpClient httpDoer = &http.Client{Timeout: 30 * time.Second}
 // SetHTTPClient swaps the package-level client (test seam).
 func SetHTTPClient(c httpDoer) { httpClient = c }
 
-// maxAttempts mirrors svc/plugin/fetch.go (CLAUDE.md convention:
-// "max retry times is 5") and is applied to API-backed counts.
-const maxAttempts = 5
+// maxAttempts is the shared project retry budget, re-exported locally
+// so the API-backed counters and their tests name it once.
+const maxAttempts = gohttp.DEFAULT_MAX_ATTEMPTS
 
 // counter is the common shape used by every API-backed strategy and
 // the local tiktoken encoder. Local heuristic uses localCount directly.
@@ -93,47 +95,53 @@ func supportedProviders() string {
 	return strings.Join(names, ", ")
 }
 
+// httpOutcome is the value utils.Retry carries between attempts. Both
+// fields survive a failed loop so callers can still build an error
+// message from the last status and body.
+type httpOutcome struct {
+	status int
+	body   []byte
+}
+
+// statusError marks a non-2xx response. It exists so withRetry can tell
+// "the request itself failed" apart from "the endpoint answered, just not
+// with 2xx" and preserve the latter's (status, body, nil) contract.
+type statusError struct {
+	status int
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("http %d", e.status) }
+
 // withRetry invokes do up to maxAttempts times for transient errors
 // (429, 5xx, network errors). Permanent 4xx returns immediately.
 // Backoff: 200ms × 2^(attempt-1), capped at 5s. ctx cancellation
 // during sleep returns ctx.Err() without further attempts.
+//
+// A non-2xx response is not an error to this function: it returns the
+// status and body with a nil error and lets the caller decide how to
+// phrase the failure.
 func withRetry(ctx context.Context, do func(ctx context.Context) (int, []byte, error)) (int, []byte, error) {
-	var lastStatus int
-	var lastBody []byte
-	var lastErr error
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	outcome, err := gohttp.Retry(ctx, gohttp.DefaultRetryPolicy(), func(ctx context.Context) (httpOutcome, error) {
 		status, body, err := do(ctx)
-		lastStatus, lastBody, lastErr = status, body, err
+		out := httpOutcome{status: status, body: body}
+		switch {
+		case err != nil:
+			// Network-level failure (DNS, dial, TLS, timeout, body read).
+			return out, gohttp.Retryable(err)
+		case status >= 200 && status < 300:
+			return out, nil
+		case gohttp.IsRetryableStatus(status):
+			return out, gohttp.Retryable(&statusError{status: status})
+		default:
+			return out, &statusError{status: status}
+		}
+	})
 
-		if err == nil && status >= 200 && status < 300 {
-			return status, body, nil
-		}
-		if !isRetryable(status, err) {
-			return status, body, err
-		}
-		if attempt < maxAttempts {
-			delay := time.Duration(1<<uint(attempt-1)) * 200 * time.Millisecond
-			if delay > 5*time.Second {
-				delay = 5 * time.Second
-			}
-			select {
-			case <-ctx.Done():
-				return 0, nil, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
+	var status *statusError
+	if errors.As(err, &status) {
+		return outcome.status, outcome.body, nil
 	}
-	return lastStatus, lastBody, lastErr
-}
-
-// isRetryable returns true for network errors, 429, and 5xx. Other
-// 4xx responses are permanent and surface immediately.
-func isRetryable(status int, err error) bool {
-	if err != nil {
-		return true
-	}
-	return status == http.StatusTooManyRequests || status >= 500
+	return outcome.status, outcome.body, err
 }
 
 // trimForErr caps an upstream error body for inclusion in our error

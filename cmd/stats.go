@@ -1,4 +1,4 @@
-package stats
+package cmd
 
 import (
 	"os"
@@ -7,12 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// StatsCmd returns the stats command.
-func StatsCmd() *cobra.Command {
+// statsCmd returns the stats command.
+func statsCmd() *cobra.Command {
 	var bucketDuration string
 	var period string
-
-	stat.InitDefaults()
 
 	cmd := &cobra.Command{
 		Use:   "stats",

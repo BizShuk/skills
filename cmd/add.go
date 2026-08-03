@@ -5,10 +5,10 @@ import (
 	"os"
 
 	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/svc/discover"
 	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/svc/tui"
 	"github.com/bizshuk/skills/svc/update"
-	"github.com/bizshuk/skills/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +30,7 @@ func addCmd() *cobra.Command {
 				return fmt.Errorf("source: %w", err)
 			}
 
-			cat, err := utils.Walk(ctx, fetch.New(), src, depth)
+			cat, err := discover.Walk(ctx, fetch.New(), src, depth)
 			if err != nil {
 				return fmt.Errorf("discover: %w", err)
 			}

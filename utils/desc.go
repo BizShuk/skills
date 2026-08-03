@@ -1,27 +1,24 @@
-package model
+package utils
 
 import (
 	"os"
 	"strings"
 )
 
-// descMaxChars bounds the description preview the renderer shows per
-// skill/subagent. If SKILL.md's body line exceeds this, ReadDescription
-// truncates it and appends "..." so a single-line preview still fits.
-const descMaxChars = 60
-
 // ReadDescription returns the first non-empty, non-heading line of path
-// (treated as a markdown file), trimmed and truncated to descMaxChars
-// runes. Returns "" if the file is unreadable, empty, or all headings.
+// (treated as a markdown file), trimmed. Returns "" if the file is
+// unreadable, empty, or all headings. Truncation to a display width is
+// the renderer's job — svc/tui does it with truncateRune, so the same
+// description can be shown at different widths.
 //
 // If the file starts with YAML frontmatter, the function first looks for
 // a "description:" key inside that frontmatter and returns its value
 // instead. Block-scalar values (">" or "|") and the "- >" folded form are
 // assembled from subsequent indented lines until an unindented line ends
-// the block. The same parser is used by svc/plugin/manifest.go's
-// scanSkills / scanSubagents and by svc/agent/installed.go's discovery —
-// keeping it in one place means a description rendered from a SKILL.md on
-// disk matches what the same file would have rendered at install time.
+// the block. The same parser is used by svc/plugin/scan.go's scanSkills /
+// scanSubagents and by svc/agent/installed.go's discovery — keeping it in
+// one place means a description rendered from a SKILL.md on disk matches
+// what the same file would have rendered at install time.
 func ReadDescription(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {

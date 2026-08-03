@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -327,8 +328,8 @@ func TestDropNamesByScope_BothScopesInOneCall(t *testing.T) {
 	})
 
 	dropped := DropNamesByScope(f, agent.RemovedNames{
-		ProjectSkills:    []string{"writer"},
-		GlobalSubagents:  []string{"reviewer"},
+		ProjectSkills:   []string{"writer"},
+		GlobalSubagents: []string{"reviewer"},
 		// Subagents in Project, Skills in Global → each side picks up
 		// exactly the half it owns.
 	})
@@ -402,4 +403,26 @@ func TestSave_CreatesStoreDir(t *testing.T) {
 	var roundtrip InstallsFile
 	require.NoError(t, json.Unmarshal(data, &roundtrip))
 	assert.Equal(t, 1, roundtrip.Version)
+}
+
+// TestStorePathStaysAbsoluteAndIsolated is the regression guard for the bug
+// that seeded this file's isolation: storePath once resolved through an empty
+// config dir, producing the RELATIVE path "data/installs.json". Every test
+// here then wrote into the source tree instead of the temp dir, and the
+// t.Setenv("XDG_CONFIG_HOME") lines above did nothing — silently, because a
+// relative path also happens to miss the user's real installs.json, so the
+// assertions still passed.
+//
+// Assert both halves: absolute (never relative to cwd) and inside the
+// temp dir this test controls (isolation actually connected).
+func TestStorePathStaysAbsoluteAndIsolated(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+
+	got, err := storePath()
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(got),
+		"storePath() = %q — a relative path would resolve against the caller's cwd", got)
+	assert.True(t, strings.HasPrefix(got, tmp),
+		"storePath() = %q, want it under the test's XDG_CONFIG_HOME %q", got, tmp)
 }

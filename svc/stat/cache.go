@@ -6,17 +6,19 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mitchellh/go-homedir"
+	"github.com/bizshuk/skills/utils"
 )
 
-// GetCacheFilePath returns the cache file path for a given date.
+// APP_NAME is this binary's gosdk application name; it decides which
+// ~/.config/<app> tree the stats cache lands in.
+const APP_NAME = "skills"
+
+// GetCacheFilePath returns the cache file path for a given date. It lands
+// under this app's own data dir (~/.config/skills/data), the same directory
+// svc/update writes installs.json to — previously this pointed at
+// ~/.config/cc-plugin, a different application's namespace.
 func GetCacheFilePath(date string) string {
-	homedir.DisableCache = true
-	dataDir, err := homedir.Expand("~/.config/cc-plugin/data")
-	if err != nil {
-		dataDir = "~/.config/cc-plugin/data"
-	}
-	return filepath.Join(dataDir, fmt.Sprintf("stats_%s.json", date))
+	return filepath.Join(utils.AppDataDir(APP_NAME), fmt.Sprintf("stats_%s.json", date))
 }
 
 // LoadCache loads cached DayStats from disk.

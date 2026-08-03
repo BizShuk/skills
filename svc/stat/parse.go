@@ -9,9 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/mitchellh/go-homedir"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -158,11 +155,7 @@ func selectClaudeTokenEntries(entries []claudeTokenEntry) []claudeTokenEntry {
 
 // ParseClaudeLogs parses Claude Code project session logs for a given date.
 func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	homedir.DisableCache = true
-	projectsDir := viper.GetString("sources.claude.projects_dir")
-	if exp, err := homedir.Expand(projectsDir); err == nil {
-		projectsDir = exp
-	}
+	projectsDir := sessionRoot("claude-code", 0, "sources.claude.projects_dir")
 	targetStart, err := time.ParseInLocation("2006-01-02", targetDate, loc)
 	if err != nil {
 		return err
@@ -305,15 +298,8 @@ func ParseClaudeLogs(ds *DayStats, targetDate string, loc *time.Location) error 
 
 // ParseCodexLogs parses Codex session and archived rollout logs.
 func ParseCodexLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	homedir.DisableCache = true
-	sessionsDir := viper.GetString("sources.codex.sessions_dir")
-	if exp, err := homedir.Expand(sessionsDir); err == nil {
-		sessionsDir = exp
-	}
-	archivedDir := viper.GetString("sources.codex.archived_dir")
-	if exp, err := homedir.Expand(archivedDir); err == nil {
-		archivedDir = exp
-	}
+	sessionsDir := sessionRoot("codex", 0, "sources.codex.sessions_dir")
+	archivedDir := sessionRoot("codex", 1, "sources.codex.archived_dir")
 	_, err := time.ParseInLocation("2006-01-02", targetDate, loc)
 	if err != nil {
 		return err
@@ -538,20 +524,12 @@ func ParseAntigravityBrainLogs(ds *DayStats, brainDir string, agentName string, 
 
 // ParseAntigravityLogs parses Antigravity session transcript logs.
 func ParseAntigravityLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	homedir.DisableCache = true
-	brainDir := viper.GetString("sources.antigravity.brain_dir")
-	if exp, err := homedir.Expand(brainDir); err == nil {
-		brainDir = exp
-	}
+	brainDir := sessionRoot("antigravity", 0, "sources.antigravity.brain_dir")
 	return ParseAntigravityBrainLogs(ds, brainDir, "antigravity", targetDate, loc)
 }
 
 // ParseAntigravityCliLogs parses Antigravity CLI session transcript logs.
 func ParseAntigravityCliLogs(ds *DayStats, targetDate string, loc *time.Location) error {
-	homedir.DisableCache = true
-	brainDir := viper.GetString("sources.antigravity_cli.brain_dir")
-	if exp, err := homedir.Expand(brainDir); err == nil {
-		brainDir = exp
-	}
+	brainDir := sessionRoot("antigravity-cli", 0, "sources.antigravity_cli.brain_dir")
 	return ParseAntigravityBrainLogs(ds, brainDir, "antigravity-cli", targetDate, loc)
 }

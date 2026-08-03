@@ -1,7 +1,8 @@
 // archive.go holds the download-and-extract machinery shared by every
-// archive-based target (GitHub codeload, GitLab archive, plain .tar.gz URL):
-// the retry loop, the transient/permanent error classification, and the
-// tar.gz extractor that strips the archive's leading directory.
+// archive-based target (GitHub codeload, GitLab archive, plain .tar.gz URL).
+// The retry loop and the transient/permanent classification come from
+// utils.Retry / utils.Retryable; what stays here is the tar.gz extractor
+// that strips the archive's leading directory.
 package fetch
 
 import (
@@ -15,42 +16,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	gohttp "github.com/bizshuk/gosdk/http"
 )
 
-// fetchArchive downloads and extracts archiveURL with up to maxAttempts
-// retries on transient errors. The final error (if any) is wrapped with an
+// fetchArchive downloads and extracts archiveURL, retrying transient
+// failures under the shared utils retry policy. The final error (if any) is wrapped with an
 // "unable to fetch <label>" prefix so callers surface a stable message.
 func (f *httpFetcher) fetchArchive(ctx context.Context, archiveURL, label string) (string, error) {
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		dir, err := f.downloadAndExtract(ctx, archiveURL)
-		if err == nil {
-			return dir, nil
-		}
-		lastErr = err
-		if !isTransient(err) {
-			// 4xx and other permanent errors: stop retrying immediately.
-			break
-		}
-		if attempt < maxAttempts {
-			// Light exponential backoff (200ms, 400ms, 800ms, 1.6s) so we
-			// don't hammer a struggling endpoint. Capped to keep the user
-			// experience snappy when the network is just flapping.
-			delay := time.Duration(1<<uint(attempt-1)) * 200 * time.Millisecond
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(delay):
-			}
-		}
+	// Light exponential backoff (200ms, 400ms, 800ms, 1.6s) so we don't
+	// hammer a struggling endpoint; utils.Retry stops early on permanent
+	// errors (4xx) because downloadAndExtract leaves those untagged.
+	dir, err := gohttp.Retry(ctx, gohttp.DefaultRetryPolicy(), func(ctx context.Context) (string, error) {
+		return f.downloadAndExtract(ctx, archiveURL)
+	})
+	if err == nil {
+		return dir, nil
 	}
-	return "", fmt.Errorf("unable to fetch %s: %w", label, lastErr)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
+	return "", fmt.Errorf("unable to fetch %s: %w", label, err)
 }
 
 // downloadAndExtract fetches the tarball once, classifies the result, and
 // returns the extracted tempdir on success. The caller decides whether to
-// retry based on isTransient.
+// retry based on the utils.Retryable tag.
 func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string) (string, error) {
 	resp, err := f.get(ctx, archiveURL)
 	if err != nil {
@@ -60,7 +51,7 @@ func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string)
 
 	tmpDir, err := os.MkdirTemp("", "skills-fetch-*")
 	if err != nil {
-		return "", transient(err)
+		return "", gohttp.Retryable(err)
 	}
 
 	if err := extractTarGZ(resp.Body, tmpDir); err != nil {
@@ -73,29 +64,34 @@ func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string)
 }
 
 // get performs a single GET and returns the response only for a 2xx status.
-// 5xx responses are tagged transient; 4xx and anything else are permanent.
-// The body of a non-2xx response is drained and closed so the connection can
-// be reused.
+// Retryable statuses (429 and 5xx, per gohttp.IsRetryableStatus) are tagged
+// transient; every other 4xx is permanent. The body of a non-2xx response is
+// drained and closed so the connection can be reused.
+//
+// 429 used to fall through to the permanent branch here while svc/rule and
+// svc/token both retried it — sharing one classifier removes that split, at
+// the cost of archive downloads now backing off on a rate limit instead of
+// failing outright. That is what GitHub codeload actually wants.
 func (f *httpFetcher) get(ctx context.Context, rawURL string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, transient(err)
+		return nil, gohttp.Retryable(err)
 	}
 	resp, err := f.client.Do(req)
 	if err != nil {
 		// Network-level failure (DNS, dial, TLS, timeout) — always transient.
-		return nil, transient(err)
+		return nil, gohttp.Retryable(err)
 	}
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return resp, nil
-	case resp.StatusCode >= 500:
+	case gohttp.IsRetryableStatus(resp.StatusCode):
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
-		return nil, transient(fmt.Errorf("http %d from %s", resp.StatusCode, rawURL))
+		return nil, gohttp.Retryable(fmt.Errorf("http %d from %s", resp.StatusCode, rawURL))
 	default:
-		// 4xx and anything else: permanent. The archive isn't going to
-		// magically appear on retry.
+		// Remaining 4xx and anything else: permanent. The archive isn't
+		// going to magically appear on retry.
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("http %d from %s", resp.StatusCode, rawURL)
@@ -110,7 +106,7 @@ func (f *httpFetcher) get(ctx context.Context, rawURL string) (*http.Response, e
 func extractTarGZ(r io.Reader, dest string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
-		return transient(err)
+		return gohttp.Retryable(err)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
@@ -124,7 +120,7 @@ func extractTarGZ(r io.Reader, dest string) error {
 
 	absDest, err := filepath.Abs(dest)
 	if err != nil {
-		return transient(err)
+		return gohttp.Retryable(err)
 	}
 
 	for {
@@ -133,7 +129,7 @@ func extractTarGZ(r io.Reader, dest string) error {
 			break
 		}
 		if err != nil {
-			return transient(err)
+			return gohttp.Retryable(err)
 		}
 		seenAny = true
 
@@ -159,7 +155,7 @@ func extractTarGZ(r io.Reader, dest string) error {
 		if rel == "" {
 			// Top-level directory entry — nothing to write.
 			if err := os.MkdirAll(absDest, 0o755); err != nil {
-				return transient(err)
+				return gohttp.Retryable(err)
 			}
 			continue
 		}
@@ -176,14 +172,14 @@ func extractTarGZ(r io.Reader, dest string) error {
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(cleaned, 0o755); err != nil {
-				return transient(err)
+				return gohttp.Retryable(err)
 			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(cleaned), 0o755); err != nil {
-				return transient(err)
+				return gohttp.Retryable(err)
 			}
 			if err := writeRegularFile(tr, cleaned, hdr.FileInfo().Mode()); err != nil {
-				return transient(err)
+				return gohttp.Retryable(err)
 			}
 		default:
 			// Skip symlinks, devices, fifos, pax headers, etc. We only
@@ -221,23 +217,4 @@ func containsParent(p string) bool {
 		}
 	}
 	return false
-}
-
-// transientError wraps an error that may succeed on retry. We use a typed
-// wrapper (rather than a sentinel) so the classification survives wrapping
-// by %w at the call site.
-type transientError struct {
-	err error
-}
-
-func (e *transientError) Error() string { return e.err.Error() }
-func (e *transientError) Unwrap() error { return e.err }
-
-func transient(err error) error { return &transientError{err: err} }
-
-// isTransient reports whether err (or any wrapped error) was tagged as
-// retryable by the downloader.
-func isTransient(err error) bool {
-	var te *transientError
-	return errors.As(err, &te)
 }

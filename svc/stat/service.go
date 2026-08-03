@@ -7,18 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/spf13/viper"
 )
-
-// InitDefaults 設定 viper 預設值，供呼叫端初始化時使用。
-func InitDefaults() {
-	viper.SetDefault("sources.claude.projects_dir", "~/.claude/projects")
-	viper.SetDefault("sources.codex.sessions_dir", "~/.codex/sessions")
-	viper.SetDefault("sources.codex.archived_dir", "~/.codex/archived_sessions")
-	viper.SetDefault("sources.antigravity.brain_dir", "~/.gemini/antigravity-ide/brain")
-	viper.SetDefault("sources.antigravity_cli.brain_dir", "~/.gemini/antigravity-cli/brain")
-}
 
 // Run 執行完整的統計流程：解析 → 聚合 → 回傳 StatsResult。
 func Run(period, bucketDuration string) (*StatsResult, error) {

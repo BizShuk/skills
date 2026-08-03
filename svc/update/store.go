@@ -17,9 +17,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/bizshuk/gosdk/config"
-
 	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/utils"
 )
 
 // Scope is either "project" or "global" — where skills were installed.
@@ -55,11 +54,14 @@ type InstallsFile struct {
 	Entries []Entry `json:"entries"`
 }
 
+// APP_NAME is this binary's gosdk application name; it decides which
+// ~/.config/<app> tree the installs metadata lands in.
+const APP_NAME = "skills"
+
 // storePath returns the absolute path to the installs metadata file.
 // Under gosdk convention this resolves to ~/.config/skills/data/installs.json.
 func storePath() (string, error) {
-	cfgDir := config.GetAppConfigDir()
-	return filepath.Join(cfgDir, "data", "installs.json"), nil
+	return filepath.Join(utils.AppDataDir(APP_NAME), "installs.json"), nil
 }
 
 // Load reads and decodes the installs file. If the file does not exist it

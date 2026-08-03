@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	gohttp "github.com/bizshuk/gosdk/http"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 	// receives no positional URL.
 	DefaultURL = "https://raw.githubusercontent.com/BizShuk/cc-plugin/refs/heads/master/config/CLAUDE.global.md"
 
-	maxFetchAttempts = 5
+	maxFetchAttempts = gohttp.DEFAULT_MAX_ATTEMPTS
 )
 
 // Fetcher downloads a global rule document. RetryDelay is applied between
@@ -45,72 +47,55 @@ func (f Fetcher) Fetch(ctx context.Context, sourceURL string) ([]byte, error) {
 		client = http.DefaultClient
 	}
 
-	var lastErr error
-	for attempt := 1; attempt <= maxFetchAttempts; attempt++ {
-		body, retry, err := fetchOnce(ctx, client, sourceURL)
-		if err == nil {
-			return body, nil
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("fetch global rule: %w", ctxErr)
-		}
-		if !retry {
-			return nil, fmt.Errorf("fetch global rule: %w", err)
-		}
-
-		lastErr = err
-		if attempt == maxFetchAttempts {
-			break
-		}
-		if err := waitForRetry(ctx, f.RetryDelay); err != nil {
-			return nil, fmt.Errorf("fetch global rule: %w", err)
-		}
+	body, err := gohttp.Retry(
+		ctx,
+		gohttp.ConstantRetryPolicy(maxFetchAttempts, f.RetryDelay),
+		func(ctx context.Context) ([]byte, error) {
+			return fetchOnce(ctx, client, sourceURL)
+		},
+	)
+	if err == nil {
+		return body, nil
 	}
-
-	return nil, fmt.Errorf("fetch global rule after %d attempts: %w", maxFetchAttempts, lastErr)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("fetch global rule: %w", ctxErr)
+	}
+	if gohttp.IsRetryable(err) {
+		return nil, fmt.Errorf("fetch global rule after %d attempts: %w", maxFetchAttempts, err)
+	}
+	return nil, fmt.Errorf("fetch global rule: %w", err)
 }
 
-func fetchOnce(ctx context.Context, client *http.Client, sourceURL string) ([]byte, bool, error) {
+// fetchOnce performs a single GET. Errors that may clear on their own —
+// network failures, 429, 5xx — come back tagged with utils.Retryable;
+// everything else is permanent and stops the loop on the first attempt.
+func fetchOnce(ctx context.Context, client *http.Client, sourceURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
-		return nil, false, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, true, fmt.Errorf("request: %w", err)
+		return nil, gohttp.Retryable(fmt.Errorf("request: %w", err))
 	}
 
 	body, readErr := io.ReadAll(resp.Body)
 	closeErr := resp.Body.Close()
 	if readErr != nil {
-		return nil, true, fmt.Errorf("read response: %w", readErr)
+		return nil, gohttp.Retryable(fmt.Errorf("read response: %w", readErr))
 	}
 	if closeErr != nil {
-		return nil, true, fmt.Errorf("close response: %w", closeErr)
+		return nil, gohttp.Retryable(fmt.Errorf("close response: %w", closeErr))
 	}
 
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-		return body, false, nil
+		return body, nil
 	}
 
 	statusErr := fmt.Errorf("http %d (%s)", resp.StatusCode, resp.Status)
-	retry := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
-	return nil, retry, statusErr
-}
-
-func waitForRetry(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		return nil
+	if gohttp.IsRetryableStatus(resp.StatusCode) {
+		return nil, gohttp.Retryable(statusErr)
 	}
-
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return nil, statusErr
 }

@@ -1,4 +1,4 @@
-package plugin_test
+package discover_test
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/bizshuk/skills/svc/discover"
 	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/svc/plugin"
-	"github.com/bizshuk/skills/utils"
 )
 
 // fakeFetcher maps an ownerRepo substring to a prepared local dir. Unknown
@@ -87,7 +87,7 @@ func TestWalk_LocalOnlyWalk(t *testing.T) {
 	}`)
 	skillPath := mkSkill(t, filepath.Join(root, "p"), "d", "writer")
 
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		fakeFetcher{},
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -119,7 +119,7 @@ func TestWalk_RemoteUnreachable(t *testing.T) {
 		]
 	}`)
 
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{}},
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -161,7 +161,7 @@ func TestWalk_DepthLimitStops(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"acme/inner": inner}}
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		ff,
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -206,7 +206,7 @@ func TestWalk_RemoteRootPluginAbsorbedNotNested(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"bizshuk/gosdk": repo}}
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		ff,
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -257,7 +257,7 @@ func TestWalk_NestedRemotePluginAppearsAsChild(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"acme/inner": inner}}
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		ff,
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -299,7 +299,7 @@ func TestWalk_RedundantSubPluginAbsorbed(t *testing.T) {
 	}`)
 
 	ff := fakeFetcher{repos: map[string]string{"egonex-ai/understand-anything": inner}}
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		ff,
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -347,7 +347,7 @@ func TestWalk_DedupesSkillsByName(t *testing.T) {
 
 	src, err := fetch.Parse(base)
 	require.NoError(t, err)
-	cat, err := utils.Walk(context.Background(), fetch.New(), src, 3)
+	cat, err := discover.Walk(context.Background(), fetch.New(), src, 3)
 	require.NoError(t, err)
 	require.NotEmpty(t, cat.Roots)
 
@@ -393,7 +393,7 @@ func TestWalk_PluginJSONRemoteSkillMergedIntoPluginSkills(t *testing.T) {
 		]
 	}`), 0o644))
 
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -425,7 +425,7 @@ func TestWalk_PluginJSONRemoteSkillShorthand(t *testing.T) {
 		"skills": ["acme/remote-writer"]
 	}`), 0o644))
 
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -460,7 +460,7 @@ func TestWalk_PluginJSONRemoteSkillCollection(t *testing.T) {
 		"skills": ["acme/remote-writer"]
 	}`), 0o644))
 
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
@@ -492,7 +492,7 @@ func TestWalk_PluginJSONRemoteSkillShorthandRootSkill(t *testing.T) {
 		"skills": ["guangyuspace/codex-gamestudio-skill"]
 	}`), 0o644))
 
-	cat, err := utils.Walk(
+	cat, err := discover.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"guangyuspace/codex-gamestudio-skill": remoteRepo}},
 		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},

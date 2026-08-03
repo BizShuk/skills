@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bizshuk/skills/model"
+	"github.com/bizshuk/skills/utils"
 )
 
 // Scope mirrors update.Scope exactly so the two can be converted at the
@@ -57,10 +57,10 @@ type InstalledLocation struct {
 // the skill's SKILL.md (or subagent .md frontmatter) at discovery time
 // and rendered inline next to the name in the TUI.
 type InstalledItem struct {
-	Name        string             // "writer" (skill) or "code-reviewer" (subagent)
+	Name        string // "writer" (skill) or "code-reviewer" (subagent)
 	Kind        InstalledKind
-	Scope       Scope              // ScopeProject | ScopeGlobal
-	Description string             // short summary for TUI rendering (may be empty)
+	Scope       Scope  // ScopeProject | ScopeGlobal
+	Description string // short summary for TUI rendering (may be empty)
 	Locations   []InstalledLocation
 }
 
@@ -111,7 +111,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 				root = filepath.Join(cwd, root)
 			}
 			if err := scanSkillsDir(root, func(name, abs string) {
-				add(InstalledSkill, ScopeProject, name, model.ReadDescription(filepath.Join(abs, "SKILL.md")), InstalledLocation{
+				add(InstalledSkill, ScopeProject, name, utils.ReadDescription(filepath.Join(abs, "SKILL.md")), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
@@ -124,7 +124,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 				root = filepath.Join(cwd, root)
 			}
 			if err := scanAgentsDir(root, func(name, abs string) {
-				add(InstalledSubagent, ScopeProject, name, model.ReadDescription(abs), InstalledLocation{
+				add(InstalledSubagent, ScopeProject, name, utils.ReadDescription(abs), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
@@ -135,7 +135,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		// Global-scope paths (already absolute per Agents()).
 		if a.UserSkillsDir != "" {
 			if err := scanSkillsDir(a.UserSkillsDir, func(name, abs string) {
-				add(InstalledSkill, ScopeGlobal, name, model.ReadDescription(filepath.Join(abs, "SKILL.md")), InstalledLocation{
+				add(InstalledSkill, ScopeGlobal, name, utils.ReadDescription(filepath.Join(abs, "SKILL.md")), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {
@@ -144,7 +144,7 @@ func DiscoverInstalled() ([]InstalledItem, error) {
 		}
 		if a.UserAgentsDir != "" {
 			if err := scanAgentsDir(a.UserAgentsDir, func(name, abs string) {
-				add(InstalledSubagent, ScopeGlobal, name, model.ReadDescription(abs), InstalledLocation{
+				add(InstalledSubagent, ScopeGlobal, name, utils.ReadDescription(abs), InstalledLocation{
 					Agent: a.Type, Path: abs,
 				})
 			}); err != nil {

@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/svc/discover"
 	"github.com/bizshuk/skills/svc/fetch"
-	"github.com/bizshuk/skills/utils"
 )
 
 // Run loads the installs file and re-installs every tracked entry by
@@ -67,7 +67,7 @@ func updateEntry(e Entry) error {
 	}
 
 	// Walk discovers the current skill/subagent tree from the source.
-	cat, err := utils.Walk(ctx, fetch.New(), src, e.Depth)
+	cat, err := discover.Walk(ctx, fetch.New(), src, e.Depth)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}

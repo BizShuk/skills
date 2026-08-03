@@ -1,7 +1,6 @@
 # TODO
 
 - [ ] change to api.github.com for private repo
-- [ ] Create model package for types.go
 
 ## Remove
 
@@ -9,5 +8,12 @@
 
 ## Archive
 
+- [x] Align package scope with domain folders (utils→svc/discover, model→utils, cmd/stats) @2026-08-03 @Completed
+- [x] `svc/stat` 改讀 `svc/agent/providers/` 的 `sessionDirs` @2026-08-03 @Completed
+- [x] 收斂三份 HTTP retry 至 `gosdk/http`（gosdk v1.3.1 發版）@2026-08-03 @Completed
+- [x] 拆分 `svc/plugin/manifest.go` 與 `svc/tui/tui.go` @2026-08-03 @Completed
+- [x] 拆分 `svc/plugin/manifest_test.go` 為 manifest／scan 兩份 @2026-08-03 @Completed
+- [x] 稽核測試隔離設定是否真的生效，補上絕對路徑守衛 @2026-08-03 @Completed
+- [x] Create model package for types.go @Completed
 - [x] Add auto update @2026-07-12_23:16:53 @Completed
 - [x] Add subagent @2026-07-08_23:40:03 @Completed
