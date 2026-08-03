@@ -25,17 +25,26 @@ go build -o bin/skills .
 skills add [path]
 ```
 
-`path` 可以是 GitHub shorthand、完整 GitHub URL、子路徑、GitLab URL、任意 https 連結，或本機相對／絕對路徑。下列為各類來源各一行範例：
+`path` 是`目標 (target)`，命令會依目標種類選擇取得方式：本機路徑直接就地讀取，
+GitHub 與 GitLab 下載 repo archive，其他 git URL 以 `git clone --depth 1` 取得，
+單一 https 文件則直接下載。下列為各類目標各一行範例：
 
 ```bash
 skills add owner/repo
 skills add https://github.com/owner/repo
 skills add https://github.com/owner/repo/tree/main/skills/foo
+skills add owner/repo/skills/foo
 skills add https://gitlab.com/group/subgroup/repo
-skills add https://example.com/team
+skills add https://git.example.com/team/repo.git
+skills add https://raw.githubusercontent.com/owner/repo/main/skills/foo/SKILL.md
+skills add https://example.com/pack.tar.gz
 skills add ./local/plugins
 skills add owner/repo#v2
 ```
+
+指定`子路徑 (subpath)`時只會安裝該路徑底下的 skill，而非整個 repo；子路徑不存在
+會直接報錯，不會退回整個 repo。單一 https 文件目標僅接受 `.tar.gz`／`.tgz`
+archive 與 `.md` skill 文件，其餘 URL 會明確拒絕而非猜測內容。
 
 ## `skills session`
 
@@ -117,6 +126,27 @@ symlink 會由同目錄的原子替換 (atomic replace) 直接覆寫，不建立
 
 未帶 `--agent` 時，`agent.Detect()` 以各 agent 的 home 目錄是否存在判定目前
 已安裝的 agent，並在 TUI 中預先勾選。
+
+## Manifest 的 `skills` 欄位
+
+`marketplace.json` 以 `source` 指向各個 plugin 目錄，該目錄的 `plugin.json` 再以
+`skills` 陣列宣告自己的 skill 從哪裡來。每個條目可以是`路徑`或`repo`：
+
+| 寫法                                  | 判定       |
+| ------------------------------------- | ---------- |
+| `./skills/foo`、`../x`、絕對路徑      | 路徑       |
+| `github:owner/repo`、URL、`git@...`   | repo       |
+| `library/outline`（本機存在）         | 路徑       |
+| `bizshuk/autop`（本機不存在）         | repo       |
+
+`owner/repo` 與相對路徑的寫法完全相同，因此這類條目以`本機是否真的存在`裁決；
+明確標記的寫法不受此影響。路徑條目逃出 plugin 目錄（`../` 或指向他處的絕對路徑）
+一律丟棄。
+
+repo 條目支援兩種 repo 形狀：repo 根目錄放 `SKILL.md`（整個 repo 就是一個
+skill，名稱取自 manifest 條目），或 repo 內以慣例的 `skills/<name>/SKILL.md`
+收納多個 skill。兩種形狀取得的 skill 都會併入宣告它的 plugin 之下，而非另外
+掛成子分類 —— 因為 manifest 宣告的是「我的 skill」。
 
 ## 遞迴與並行 (Recursion)
 

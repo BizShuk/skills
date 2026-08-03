@@ -17,6 +17,10 @@
 
 - 本專案模組名稱為 `github.com/bizshuk/skills`。
 - 單一職責分層架構，業務程式碼放置於 `svc/` 目錄。
+- 目標取得 (target fetching) 由 `svc/fetch` 單一擁有：`Parse` 負責分類 target，
+  `Fetcher.Materialize` 負責取得成本機目錄，兩者以 target 種類分檔
+  (`github.go`／`gitlab.go`／`git.go`／`http.go`)。`svc/plugin` 只負責 manifest
+  解讀，不得自行實作下載邏輯。
 - 專案依賴管理使用 `go.mod` 與 `go.sum`。
 - 代理器配置採用 JSON 檔案，統一存放於 `svc/agent/providers/` 目錄中，並以 `go:embed` 內嵌；session roots 由各 provider 的 `sessionDirs` 設定，全域規則路徑由 `globalRulePath` 設定。
 - 遵循繁體中文為主、術語併記英文圓括號的風格。

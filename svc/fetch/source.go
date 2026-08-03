@@ -1,6 +1,11 @@
-// source.go parses a user-supplied source string (owner/repo, git URL,
-// local path, well-known URL) into a normalized ParsedSource.
-package plugin
+// Package fetch resolves a user- or manifest-supplied target string into a
+// local directory on disk. It owns two responsibilities and nothing else:
+// classifying a target (Parse) and materializing it (Fetcher.Materialize).
+//
+// source.go is the classification half: it parses a target (owner/repo,
+// git URL, GitLab URL, plain https URL, local path) into a normalized
+// ParsedSource.
+package fetch
 
 import (
 	"fmt"
@@ -10,8 +15,8 @@ import (
 	"strings"
 )
 
-// SourceType classifies a parsed source so downstream packages can pick
-// the right materialization strategy (filesystem vs. git fetch vs. HTTP).
+// SourceType classifies a parsed source so Materialize can pick the right
+// strategy (filesystem vs. archive download vs. git clone vs. HTTP).
 type SourceType int
 
 const (
@@ -22,7 +27,24 @@ const (
 	WellKnown
 )
 
-// ParsedSource is the normalized representation of a user-supplied source.
+// String renders the type for error messages.
+func (t SourceType) String() string {
+	switch t {
+	case Local:
+		return "local"
+	case GitHub:
+		return "github"
+	case GitLab:
+		return "gitlab"
+	case Git:
+		return "git"
+	case WellKnown:
+		return "url"
+	}
+	return "unknown"
+}
+
+// ParsedSource is the normalized representation of a supplied source.
 // All fields are independent and may be zero — call sites should branch on
 // Type first, then consult the URL/Ref/Subpath/SkillFilter fields relevant
 // to that type.
@@ -55,7 +77,13 @@ func sanitizeSubpath(sub string) (string, error) {
 	return sub, nil
 }
 
-func isLocalPath(in string) bool {
+// IsLocalPath reports whether in carries an explicit filesystem marker: an
+// absolute path, a "./" or "../" prefix, or a bare "." / "..". A bare
+// relative path like "skills/foo" is deliberately NOT local by this test —
+// it is indistinguishable from GitHub shorthand, so callers that have a
+// base directory should resolve that ambiguity against the disk first (see
+// the manifest scanner's skill-entry resolution).
+func IsLocalPath(in string) bool {
 	return filepath.IsAbs(in) ||
 		strings.HasPrefix(in, "./") ||
 		strings.HasPrefix(in, "../") ||
@@ -76,7 +104,7 @@ func splitFragment(in string) (base, ref, skill string) {
 	return base, frag, ""
 }
 
-// Parse turns a user-supplied source string into a normalized ParsedSource.
+// Parse turns a supplied source string into a normalized ParsedSource.
 // It supports GitHub shorthand ("owner/repo" with optional subpath and
 // "@skill" filter), GitHub full URLs (including /tree/branch/sub/path),
 // GitHub "github:" prefix, GitLab URLs with subgroups, arbitrary git URLs,
@@ -84,7 +112,7 @@ func splitFragment(in string) (base, ref, skill string) {
 // absolute). A "#ref" or "#ref@skill" fragment may be appended to git-like
 // sources. Subpaths containing ".." are rejected.
 func Parse(in string) (ParsedSource, error) {
-	if isLocalPath(in) {
+	if IsLocalPath(in) {
 		abs, err := filepath.Abs(in)
 		if err != nil {
 			return ParsedSource{}, err
@@ -106,13 +134,13 @@ func Parse(in string) (ParsedSource, error) {
 		if err != nil {
 			return ParsedSource{}, err
 		}
-		return ParsedSource{Type: GitHub, URL: ghURL(m[1], m[2]), Ref: m[3], Subpath: sub}, nil
+		return ParsedSource{Type: GitHub, URL: RepoURL(m[1], m[2]), Ref: m[3], Subpath: sub}, nil
 	}
 	if m := reGitHubTree.FindStringSubmatch(base); m != nil {
-		return ParsedSource{Type: GitHub, URL: ghURL(m[1], m[2]), Ref: m[3]}, nil
+		return ParsedSource{Type: GitHub, URL: RepoURL(m[1], m[2]), Ref: m[3]}, nil
 	}
 	if m := reGitHubRepo.FindStringSubmatch(base); m != nil {
-		return ParsedSource{Type: GitHub, URL: ghURL(m[1], strings.TrimSuffix(m[2], ".git")), Ref: fragRef}, nil
+		return ParsedSource{Type: GitHub, URL: RepoURL(m[1], strings.TrimSuffix(m[2], ".git")), Ref: fragRef}, nil
 	}
 	if m := reGitLabRepo.FindStringSubmatch(base); m != nil && strings.Contains(m[1], "/") {
 		return ParsedSource{Type: GitLab, URL: "https://gitlab.com/" + m[1] + ".git", Ref: fragRef}, nil
@@ -124,7 +152,7 @@ func Parse(in string) (ParsedSource, error) {
 			if fragSkill != "" {
 				skill = fragSkill
 			}
-			return ParsedSource{Type: GitHub, URL: ghURL(m[1], m[2]), Ref: fragRef, SkillFilter: skill}, nil
+			return ParsedSource{Type: GitHub, URL: RepoURL(m[1], m[2]), Ref: fragRef, SkillFilter: skill}, nil
 		}
 		if m := reShorthand.FindStringSubmatch(base); m != nil {
 			var sub string
@@ -135,7 +163,7 @@ func Parse(in string) (ParsedSource, error) {
 				}
 				sub = s
 			}
-			return ParsedSource{Type: GitHub, URL: ghURL(m[1], m[2]), Ref: fragRef, Subpath: sub, SkillFilter: fragSkill}, nil
+			return ParsedSource{Type: GitHub, URL: RepoURL(m[1], m[2]), Ref: fragRef, Subpath: sub, SkillFilter: fragSkill}, nil
 		}
 	}
 
@@ -146,8 +174,47 @@ func Parse(in string) (ParsedSource, error) {
 	return ParsedSource{Type: Git, URL: base, Ref: fragRef}, nil
 }
 
-func ghURL(owner, repo string) string {
+// RepoURL builds the canonical GitHub clone URL for an owner/repo pair.
+func RepoURL(owner, repo string) string {
 	return "https://github.com/" + owner + "/" + strings.TrimSuffix(repo, ".git") + ".git"
+}
+
+// OwnerRepoFromURL pulls a lowercased "owner/repo" pair out of a git URL,
+// covering both GitHub and GitLab hosts and both https and scp-style
+// ("git@host:owner/repo") forms. It returns "" when the URL names no
+// recognizable repository.
+func OwnerRepoFromURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	// Strip the scheme so the regexes see the host+path part.
+	candidate := rawURL
+	if i := strings.Index(candidate, "://"); i >= 0 {
+		candidate = candidate[i+3:]
+	} else if strings.HasPrefix(candidate, "git@") {
+		candidate = strings.TrimPrefix(candidate, "git@")
+		candidate = strings.Replace(candidate, ":", "/", 1)
+	}
+	if m := reGitHubRepo.FindStringSubmatch(candidate); m != nil {
+		return strings.ToLower(m[1] + "/" + strings.TrimSuffix(m[2], ".git"))
+	}
+	if m := reGitLabRepo.FindStringSubmatch(candidate); m != nil {
+		return strings.ToLower(strings.TrimSuffix(m[1], ".git"))
+	}
+	return ""
+}
+
+// NormalizeOwnerRepo lower-cases and trims prefixes/suffixes from a GitHub
+// shorthand "owner/repo" string. It returns "" for anything without a "/".
+func NormalizeOwnerRepo(repo string) string {
+	repo = strings.TrimSpace(repo)
+	repo = strings.TrimPrefix(repo, "github:")
+	repo = strings.TrimSuffix(repo, ".git")
+	if !strings.Contains(repo, "/") {
+		return ""
+	}
+	return strings.ToLower(repo)
 }
 
 func reattach(base, ref, skill string) string {
@@ -168,8 +235,13 @@ func isWellKnownURL(in string) bool {
 	if err != nil {
 		return false
 	}
+	// github.com / gitlab.com host repository pages, not documents: anything
+	// on those hosts that reached here is a repo URL the regexes above
+	// declined, so let it fall through to the generic git clone path.
+	// raw.githubusercontent.com is deliberately NOT excluded — it serves
+	// plain files, which the HTTP materializer knows how to handle.
 	switch u.Hostname() {
-	case "github.com", "gitlab.com", "raw.githubusercontent.com":
+	case "github.com", "gitlab.com":
 		return false
 	}
 	return !strings.HasSuffix(in, ".git")

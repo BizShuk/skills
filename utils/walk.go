@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/bizshuk/skills/model"
+	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/svc/plugin"
 	"golang.org/x/sync/errgroup"
 )
@@ -35,7 +36,7 @@ type queueEntry struct {
 // The only error path is failure to materialize root itself; every other
 // failure (malformed manifest, unreachable remote) is recorded on the
 // relevant Category and the walk continues.
-func Walk(ctx context.Context, f plugin.Fetcher, root plugin.ParsedSource, maxDepth int) (*plugin.Catalog, error) {
+func Walk(ctx context.Context, f fetch.Fetcher, root fetch.ParsedSource, maxDepth int) (*plugin.Catalog, error) {
 	rootDir, err := f.Materialize(ctx, root)
 	if err != nil {
 		return nil, fmt.Errorf("materialize root: %w", err)
@@ -117,12 +118,32 @@ func Walk(ctx context.Context, f plugin.Fetcher, root plugin.ParsedSource, maxDe
 						return
 					}
 
+					// A remote declared in a manifest's `skills` array is a
+					// skill of the parent plugin, so whatever it holds is
+					// merged into the parent rather than nested beneath it.
+					// Two repo shapes have to work:
+					//
+					//   repo IS one skill    → SKILL.md at the repo root,
+					//                          named after the manifest entry
+					//   repo HOLDS skills    → a conventional skills/ dir or
+					//                          its own manifest, which only a
+					//                          full Scan can read
+					//
+					// The second shape is handled by queueing the fetched dir
+					// for the next BFS level: its root plugin's Base equals
+					// the scanned dir, which the loop below already merges
+					// into the parent. That also lets the remote's own
+					// manifest — and any skills it declares in turn — resolve.
 					if mergeLocalsIntoParent {
 						if skill, ok := rootSkillInDir(dir, rp.Name); ok {
 							rootMu.Lock()
 							parent.Skills = dedupSkillsByName(append(parent.Skills, skill))
 							rootMu.Unlock()
+							return
 						}
+						nextMu.Lock()
+						queue = append(queue, queueEntry{parent: parent, dir: dir, depth: depth + 1})
+						nextMu.Unlock()
 						return
 					}
 
@@ -215,16 +236,21 @@ func rootSkillInDir(dir, name string) (model.Skill, bool) {
 	}, true
 }
 
-func remoteParsedSource(rp model.RemotePlugin) plugin.ParsedSource {
+// remoteParsedSource turns a manifest-declared remote into a fetch target.
+// The URL is re-parsed rather than assumed to be GitHub, so a GitLab or
+// self-hosted git entry reaches the materializer that can actually handle
+// it. A remote known only by owner/repo is GitHub shorthand by convention.
+func remoteParsedSource(rp model.RemotePlugin) fetch.ParsedSource {
 	srcURL := rp.URL
 	if srcURL == "" {
 		srcURL = "https://github.com/" + rp.OwnerRepo + ".git"
 	}
-	return plugin.ParsedSource{
-		Type: plugin.GitHub,
-		URL:  srcURL,
-		Ref:  rp.Ref,
+	src, err := fetch.Parse(srcURL)
+	if err != nil {
+		src = fetch.ParsedSource{Type: fetch.GitHub, URL: srcURL}
 	}
+	src.Ref = rp.Ref
+	return src
 }
 
 func remoteScanDir(dir string, rp model.RemotePlugin) (string, error) {

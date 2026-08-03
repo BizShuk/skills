@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/bizshuk/skills/svc/agent"
-	"github.com/bizshuk/skills/svc/plugin"
+	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/utils"
 )
 
@@ -61,13 +61,13 @@ func updateEntry(e Entry) error {
 	ctx := context.Background()
 
 	// Parse the original source.
-	src, err := plugin.Parse(e.Source)
+	src, err := fetch.Parse(e.Source)
 	if err != nil {
 		return fmt.Errorf("parse source %q: %w", e.Source, err)
 	}
 
 	// Walk discovers the current skill/subagent tree from the source.
-	cat, err := utils.Walk(ctx, plugin.New(), src, e.Depth)
+	cat, err := utils.Walk(ctx, fetch.New(), src, e.Depth)
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}

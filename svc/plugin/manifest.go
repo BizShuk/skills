@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/bizshuk/skills/model"
+	"github.com/bizshuk/skills/svc/fetch"
 )
 
 // Scan reads the .claude-plugin/marketplace.json and .claude-plugin/plugin.json
@@ -39,14 +40,30 @@ func Scan(base string) (model.Parsed, error) {
 	// it isn't itself an agents/ subdirectory, treat base as a synthetic
 	// root plugin. This keeps "drop a skill in skills/ and try it" working
 	// without requiring a manifest up front.
+	//
+	// The narrower case first: base IS a single skill directory. That is
+	// what a subpath target ("owner/repo/skills/foo") materializes to, and
+	// what a .md URL is laid out as — neither has a manifest or a skills/
+	// dir, so without this they would scan to nothing. A dir that also has
+	// a conventional skills/ child is a repo, not a skill, and falls
+	// through to the broader fallback below.
+	if !hasAnyManifest(absBase) && hasSkillFile(absBase) && !hasAnyConventionalSkillsDir(absBase) {
+		out.Locals = append(out.Locals, model.LocalPlugin{
+			Name: baseName(absBase),
+			Base: absBase,
+			Skills: []model.Skill{{
+				Name:        baseName(absBase),
+				Path:        absBase,
+				Description: readDescription(filepath.Join(absBase, "SKILL.md")),
+			}},
+		})
+		return out, nil
+	}
+
 	if !hasAnyManifest(absBase) &&
 		hasAnyConventionalSkillsDir(absBase) &&
 		!isInsideAgentDir(absBase) {
-		name := filepath.Base(absBase)
-		if name == "." || name == string(filepath.Separator) {
-			name = "root"
-		}
-		lp := model.LocalPlugin{Name: name, Base: absBase}
+		lp := model.LocalPlugin{Name: baseName(absBase), Base: absBase}
 		scanSkills(absBase, &lp, nil)
 		out.Locals = append(out.Locals, lp)
 	}
@@ -180,7 +197,7 @@ func scanMarketplace(base string, out *model.Parsed) error {
 		if !isContainedIn(pluginBase, base) {
 			continue
 		}
-		skillPaths, remoteSkills := parseManifestSkillEntries(p.Skills)
+		skillPaths, remoteSkills := parseManifestSkillEntries(p.Skills, pluginBase)
 		if mf, ok := readPluginManifest(pluginBase); ok {
 			skillPaths = append(skillPaths, mf.SkillPaths...)
 			remoteSkills = append(remoteSkills, mf.RemoteSkills...)
@@ -226,7 +243,7 @@ func readPluginManifest(base string) (pluginManifest, bool) {
 	if err := json.Unmarshal(data, &raw); err != nil || raw.Name == "" {
 		return pluginManifest{}, false
 	}
-	skillPaths, remoteSkills := parseManifestSkillEntries(raw.Skills)
+	skillPaths, remoteSkills := parseManifestSkillEntries(raw.Skills, base)
 	return pluginManifest{
 		Name:           raw.Name,
 		SkillPaths:     skillPaths,
@@ -236,7 +253,11 @@ func readPluginManifest(base string) (pluginManifest, bool) {
 	}, true
 }
 
-func parseManifestSkillEntries(entries []json.RawMessage) ([]string, []model.RemotePlugin) {
+// parseManifestSkillEntries splits a manifest's `skills` array into
+// on-disk paths (resolved relative to pluginBase) and remote plugins to be
+// fetched. String entries are classified by resolveSkillEntry; object
+// entries are always remote sources.
+func parseManifestSkillEntries(entries []json.RawMessage, pluginBase string) ([]string, []model.RemotePlugin) {
 	var paths []string
 	var remotes []model.RemotePlugin
 	for _, entry := range entries {
@@ -244,7 +265,7 @@ func parseManifestSkillEntries(entries []json.RawMessage) ([]string, []model.Rem
 		if err := json.Unmarshal(entry, &path); err == nil {
 			path = strings.TrimSpace(path)
 			if path != "" {
-				if rp, ok := parseRemoteSkillShorthand(path); ok {
+				if rp, ok := resolveSkillEntry(path, pluginBase); ok {
 					remotes = append(remotes, rp)
 				} else {
 					paths = append(paths, path)
@@ -277,18 +298,58 @@ func parseManifestSkillEntries(entries []json.RawMessage) ([]string, []model.Rem
 	return paths, remotes
 }
 
-func parseRemoteSkillShorthand(raw string) (model.RemotePlugin, bool) {
+// resolveSkillEntry decides what a string entry in a manifest's `skills`
+// array actually names, and returns a RemotePlugin only when the entry is a
+// repo. ok=false means "treat it as a path" — the caller hands it to
+// resolveManifestSkillDirs.
+//
+// The decision is made against the target itself, in this order:
+//
+//  1. Explicit filesystem markers ("./", "../", absolute) are always paths.
+//  2. Explicit remote markers ("github:", a URL scheme, "git@") are always
+//     repos.
+//  3. What is left is the genuinely ambiguous case: "skills/foo" is valid
+//     GitHub shorthand AND a valid relative path. It is resolved against
+//     the disk — if it exists under pluginBase it is a path, otherwise it
+//     is treated as owner/repo. A repo checked out locally therefore wins
+//     over a same-named repo on GitHub, which is what a plugin author
+//     shipping their own skills directory expects.
+func resolveSkillEntry(raw, pluginBase string) (model.RemotePlugin, bool) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" ||
-		strings.HasPrefix(raw, "./") ||
-		strings.HasPrefix(raw, "../") ||
-		filepath.IsAbs(raw) ||
-		strings.Contains(raw, "://") {
+	if raw == "" || fetch.IsLocalPath(raw) {
 		return model.RemotePlugin{}, false
 	}
-	raw = strings.TrimPrefix(raw, "github:")
-	source, ref, _ := strings.Cut(raw, "#")
-	ownerRepo := normalizeOwnerRepo(source)
+
+	source, ref, _ := strings.Cut(strings.TrimPrefix(raw, "github:"), "#")
+	explicitRemote := strings.HasPrefix(raw, "github:") ||
+		strings.Contains(raw, "://") ||
+		strings.HasPrefix(raw, "git@")
+
+	if !explicitRemote && existsUnder(pluginBase, raw) {
+		return model.RemotePlugin{}, false
+	}
+
+	// A full URL keeps its own address; only its identity has to be derived.
+	// GitHub and GitLab URLs yield a real owner/repo, anything else (Gitea,
+	// self-hosted, ssh remotes) falls back to the trailing two path segments
+	// so the walker still has a stable key for the entry.
+	if strings.Contains(source, "://") || strings.HasPrefix(source, "git@") {
+		ownerRepo := fetch.OwnerRepoFromURL(source)
+		if ownerRepo == "" {
+			ownerRepo = trailingOwnerRepo(source)
+		}
+		if ownerRepo == "" {
+			return model.RemotePlugin{}, false
+		}
+		return model.RemotePlugin{
+			Name:      lastPathSegment(ownerRepo),
+			OwnerRepo: ownerRepo,
+			URL:       source,
+			Ref:       ref,
+		}, true
+	}
+
+	ownerRepo := fetch.NormalizeOwnerRepo(source)
 	parts := strings.Split(ownerRepo, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return model.RemotePlugin{}, false
@@ -296,9 +357,24 @@ func parseRemoteSkillShorthand(raw string) (model.RemotePlugin, bool) {
 	return model.RemotePlugin{
 		Name:      parts[1],
 		OwnerRepo: ownerRepo,
-		URL:       ghURL(parts[0], parts[1]),
+		URL:       fetch.RepoURL(parts[0], parts[1]),
 		Ref:       ref,
 	}, true
+}
+
+// existsUnder reports whether rel names something that exists inside base.
+// Entries that escape base do not count as existing, so a manifest cannot
+// use "../../etc/passwd" to win the ambiguity check.
+func existsUnder(base, rel string) bool {
+	if base == "" {
+		return false
+	}
+	candidate := filepath.Join(base, filepath.FromSlash(rel))
+	if !isContainedIn(candidate, base) {
+		return false
+	}
+	_, err := os.Stat(candidate)
+	return err == nil
 }
 
 func inferRemoteSkillName(obj map[string]any) string {
@@ -306,13 +382,31 @@ func inferRemoteSkillName(obj map[string]any) string {
 		return lastPathSegment(strings.TrimSuffix(repo, ".git"))
 	}
 	if urlStr, _ := obj["url"].(string); urlStr != "" {
-		ownerRepo := deriveOwnerRepoFromURL(urlStr)
+		ownerRepo := fetch.OwnerRepoFromURL(urlStr)
 		if ownerRepo != "" {
 			return lastPathSegment(ownerRepo)
 		}
 		return lastPathSegment(strings.TrimSuffix(urlStr, ".git"))
 	}
 	return ""
+}
+
+// trailingOwnerRepo derives an "owner/repo"-shaped identity from a URL that
+// neither GitHub nor GitLab claims (Gitea, self-hosted, ssh remotes), by
+// taking its last two path segments. It exists only to give such entries a
+// stable dedupe key; the fetch itself always uses the original URL.
+func trailingOwnerRepo(rawURL string) string {
+	trimmed := strings.TrimSuffix(strings.TrimSpace(rawURL), ".git")
+	if i := strings.Index(trimmed, "://"); i >= 0 {
+		trimmed = trimmed[i+3:]
+	}
+	trimmed = strings.TrimPrefix(trimmed, "git@")
+	trimmed = strings.Replace(trimmed, ":", "/", 1)
+	segments := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(segments) < 2 {
+		return ""
+	}
+	return strings.ToLower(segments[len(segments)-2] + "/" + segments[len(segments)-1])
 }
 
 func lastPathSegment(raw string) string {
@@ -336,7 +430,7 @@ func classifyRemote(name string, obj map[string]any) (model.RemotePlugin, bool) 
 	switch srcType {
 	case "github":
 		repo, _ := obj["repo"].(string)
-		ownerRepo := normalizeOwnerRepo(repo)
+		ownerRepo := fetch.NormalizeOwnerRepo(repo)
 		if ownerRepo == "" {
 			return model.RemotePlugin{}, false
 		}
@@ -348,7 +442,7 @@ func classifyRemote(name string, obj map[string]any) (model.RemotePlugin, bool) 
 		}, true
 	case "url":
 		urlStr, _ := obj["url"].(string)
-		ownerRepo := deriveOwnerRepoFromURL(urlStr)
+		ownerRepo := fetch.OwnerRepoFromURL(urlStr)
 		if ownerRepo == "" {
 			return model.RemotePlugin{}, false
 		}
@@ -356,7 +450,7 @@ func classifyRemote(name string, obj map[string]any) (model.RemotePlugin, bool) 
 	case "git-subdir":
 		urlStr, _ := obj["url"].(string)
 		subdir, _ := obj["path"].(string)
-		ownerRepo := deriveOwnerRepoFromURL(urlStr)
+		ownerRepo := fetch.OwnerRepoFromURL(urlStr)
 		if ownerRepo == "" {
 			return model.RemotePlugin{}, false
 		}
@@ -369,42 +463,6 @@ func classifyRemote(name string, obj map[string]any) (model.RemotePlugin, bool) 
 		}, true
 	}
 	return model.RemotePlugin{}, false
-}
-
-// deriveOwnerRepoFromURL pulls an "owner/repo" pair out of a git URL. It
-// uses the same regexp set as source.go since this is now the same package.
-func deriveOwnerRepoFromURL(rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return ""
-	}
-	// Strip the scheme so the regex sees the host+path part.
-	candidate := rawURL
-	if i := strings.Index(candidate, "://"); i >= 0 {
-		candidate = candidate[i+3:]
-	} else if strings.HasPrefix(candidate, "git@") {
-		candidate = strings.TrimPrefix(candidate, "git@")
-		candidate = strings.Replace(candidate, ":", "/", 1)
-	}
-	if m := reGitHubRepo.FindStringSubmatch(candidate); m != nil {
-		return strings.ToLower(m[1] + "/" + strings.TrimSuffix(m[2], ".git"))
-	}
-	if m := reGitLabRepo.FindStringSubmatch(candidate); m != nil {
-		return strings.ToLower(strings.TrimSuffix(m[1], ".git"))
-	}
-	return ""
-}
-
-// normalizeOwnerRepo lower-cases and trims suffixes from a GitHub-shorthand
-// "owner/repo" string.
-func normalizeOwnerRepo(repo string) string {
-	repo = strings.TrimSpace(repo)
-	repo = strings.TrimPrefix(repo, "github:")
-	repo = strings.TrimSuffix(repo, ".git")
-	if !strings.Contains(repo, "/") {
-		return ""
-	}
-	return strings.ToLower(repo)
 }
 
 // scanSkills fills lp.Skills with the union of conventional entries
@@ -467,11 +525,24 @@ func scanSkills(base string, lp *model.LocalPlugin, additive []string) {
 	scanSubagents(lp)
 }
 
+// resolveManifestSkillDirs turns one path entry from a manifest's `skills`
+// array into the skill directories it names. The entry may be written with
+// or without a "./" prefix, and may point at a SKILL.md file, a directory
+// holding SKILL.md, or a collection directory whose children are skills.
+//
+// Absolute entries are honored only when they still land inside base;
+// everything that escapes base — via "../" or an absolute path elsewhere on
+// the machine — resolves to nothing, so a fetched manifest cannot read
+// outside the tree it was fetched into.
 func resolveManifestSkillDirs(base, pluginBase, manifestPath string) []string {
-	if !strings.HasPrefix(manifestPath, "./") {
+	manifestPath = strings.TrimSpace(manifestPath)
+	if manifestPath == "" {
 		return nil
 	}
-	candidate := filepath.Join(pluginBase, manifestPath)
+	candidate := manifestPath
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(pluginBase, filepath.FromSlash(manifestPath))
+	}
 	if !isContainedIn(candidate, base) {
 		return nil
 	}
@@ -505,6 +576,15 @@ func resolveManifestSkillDirs(base, pluginBase, manifestPath string) []string {
 		}
 	}
 	return skillDirs
+}
+
+// baseName is filepath.Base with a usable name for degenerate roots.
+func baseName(dir string) string {
+	name := filepath.Base(dir)
+	if name == "." || name == string(filepath.Separator) {
+		return "root"
+	}
+	return name
 }
 
 func hasSkillFile(dir string) bool {
@@ -613,13 +693,6 @@ func scanSubagents(lp *model.LocalPlugin) {
 		add(name, resolved)
 	}
 }
-
-// descMaxChars bounds the description preview the TUI renders per skill.
-// Kept as a local re-export so existing references in scanSkills /
-// scanSubagents compile unchanged; the real implementation lives in
-// utils.ReadDescription so both install discovery and the remove
-// discovery share one parsing path.
-const descMaxChars = 60
 
 // readDescription is a thin wrapper kept for the scanSkills /
 // scanSubagents call sites below — the parser itself moved to

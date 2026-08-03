@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/svc/plugin"
 	"github.com/bizshuk/skills/utils"
 )
@@ -18,8 +19,8 @@ import (
 // repos fall through to os.ErrNotExist so the caller observes a fetch failure.
 type fakeFetcher struct{ repos map[string]string }
 
-func (f fakeFetcher) Materialize(_ context.Context, s plugin.ParsedSource) (string, error) {
-	if s.Type == plugin.Local {
+func (f fakeFetcher) Materialize(_ context.Context, s fetch.ParsedSource) (string, error) {
+	if s.Type == fetch.Local {
 		return s.LocalPath, nil
 	}
 	for or, dir := range f.repos {
@@ -89,7 +90,7 @@ func TestWalk_LocalOnlyWalk(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{},
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -121,7 +122,7 @@ func TestWalk_RemoteUnreachable(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{}},
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -163,7 +164,7 @@ func TestWalk_DepthLimitStops(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		1,
 	)
 	require.NoError(t, err)
@@ -208,7 +209,7 @@ func TestWalk_RemoteRootPluginAbsorbedNotNested(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -259,7 +260,7 @@ func TestWalk_NestedRemotePluginAppearsAsChild(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -301,7 +302,7 @@ func TestWalk_RedundantSubPluginAbsorbed(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		ff,
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -344,9 +345,9 @@ func TestWalk_DedupesSkillsByName(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(pluginSkillDir, "SKILL.md"),
 		[]byte("# Apple Calendar\nFrom sub-plugin."), 0o644))
 
-	src, err := plugin.Parse(base)
+	src, err := fetch.Parse(base)
 	require.NoError(t, err)
-	cat, err := utils.Walk(context.Background(), plugin.New(), src, 3)
+	cat, err := utils.Walk(context.Background(), fetch.New(), src, 3)
 	require.NoError(t, err)
 	require.NotEmpty(t, cat.Roots)
 
@@ -395,7 +396,7 @@ func TestWalk_PluginJSONRemoteSkillMergedIntoPluginSkills(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -427,7 +428,7 @@ func TestWalk_PluginJSONRemoteSkillShorthand(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
@@ -439,15 +440,17 @@ func TestWalk_PluginJSONRemoteSkillShorthand(t *testing.T) {
 	assert.Equal(t, remoteRepo, toolbox.Skills[0].Path)
 }
 
-// TestWalk_PluginJSONRemoteSkillShorthandIgnoresSkillsFolder verifies that a
-// remote entry in plugin.json "skills" is a direct skill repo. Its own
-// skills/<name>/SKILL.md collection is intentionally ignored.
-func TestWalk_PluginJSONRemoteSkillShorthandIgnoresSkillsFolder(t *testing.T) {
+// TestWalk_PluginJSONRemoteSkillCollection verifies the other repo shape a
+// remote entry in plugin.json "skills" can take: instead of being one skill
+// (SKILL.md at the repo root), the repo HOLDS skills under the conventional
+// skills/<name>/SKILL.md layout. Those skills merge into the declaring
+// plugin, since the manifest declared them as its own skills.
+func TestWalk_PluginJSONRemoteSkillCollection(t *testing.T) {
 	remoteRepo := t.TempDir()
 	nestedSkillDir := filepath.Join(remoteRepo, "skills", "nested-writer")
 	require.NoError(t, os.MkdirAll(nestedSkillDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(nestedSkillDir, "SKILL.md"),
-		[]byte("# Nested Writer\nMust be ignored."), 0o644))
+		[]byte("# Nested Writer\nWrites from a collection repo."), 0o644))
 
 	root := t.TempDir()
 	pluginDir := filepath.Join(root, ".claude-plugin")
@@ -460,13 +463,17 @@ func TestWalk_PluginJSONRemoteSkillShorthandIgnoresSkillsFolder(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"acme/remote-writer": remoteRepo}},
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)
 
 	require.Len(t, cat.Roots, 1)
-	assert.Empty(t, cat.Roots[0].Skills)
+	toolbox := cat.Roots[0]
+	assert.Empty(t, toolbox.Children, "a declared skill must not render as a child plugin")
+	require.Len(t, toolbox.Skills, 1)
+	assert.Equal(t, "nested-writer", toolbox.Skills[0].Name)
+	assert.Equal(t, nestedSkillDir, toolbox.Skills[0].Path)
 }
 
 // TestWalk_PluginJSONRemoteSkillShorthandRootSkill verifies the common
@@ -488,7 +495,7 @@ func TestWalk_PluginJSONRemoteSkillShorthandRootSkill(t *testing.T) {
 	cat, err := utils.Walk(
 		context.Background(),
 		fakeFetcher{repos: map[string]string{"guangyuspace/codex-gamestudio-skill": remoteRepo}},
-		plugin.ParsedSource{Type: plugin.Local, LocalPath: root},
+		fetch.ParsedSource{Type: fetch.Local, LocalPath: root},
 		3,
 	)
 	require.NoError(t, err)

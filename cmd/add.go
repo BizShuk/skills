@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/bizshuk/skills/svc/agent"
-	"github.com/bizshuk/skills/svc/plugin"
+	"github.com/bizshuk/skills/svc/fetch"
 	"github.com/bizshuk/skills/svc/tui"
 	"github.com/bizshuk/skills/svc/update"
 	"github.com/bizshuk/skills/utils"
@@ -25,12 +25,12 @@ func addCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			src, err := plugin.Parse(args[0])
+			src, err := fetch.Parse(args[0])
 			if err != nil {
 				return fmt.Errorf("source: %w", err)
 			}
 
-			cat, err := utils.Walk(ctx, plugin.New(), src, depth)
+			cat, err := utils.Walk(ctx, fetch.New(), src, depth)
 			if err != nil {
 				return fmt.Errorf("discover: %w", err)
 			}
