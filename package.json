@@ -1,0 +1,16 @@
+{
+  "name": "skills",
+  "version": "0.0.0",
+  "private": true,
+  "description": "skills CLI (Go)：安裝／移除 skill、subagent 與全域規則，並查詢 agent session 與 token 統計",
+  "scripts": {
+    "dev": "go run .",
+    "test": "go test ./...",
+    "build": "go build -o bin/skills .",
+    "deploy": "go install .",
+    "lint": "gofmt -l . && go vet ./...",
+    "clean": "rm -rf bin",
+    "destroy": "pm2 delete \"Skills Auto-Update\" || true",
+    "run:setup": "./scripts/run.sh"
+  }
+}
