@@ -1,17 +1,27 @@
-// github.go materializes a GitHub target by downloading the repository
-// tarball from codeload.github.com. No git binary and no clone is involved,
-// which keeps a shallow read of a public repo to a single HTTP request.
+// github.go materializes a GitHub target. Public repos are fetched as a
+// single HTTP tarball (codeload). Private repos need credentials: when
+// GITHUB_API_TOKEN is set the GitHub API tarball endpoint is used;
+// otherwise (or when the archive request still fails) the code falls back
+// to `git clone` so local SSH keys and credential helpers work.
 package fetch
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
-// materializeGitHub resolves the codeload URL for the parsed source, then
-// downloads and extracts it.
+// Overridable in tests so the git-clone fallback can be exercised offline.
+var (
+	githubAPIBase      = "https://api.github.com"
+	githubCodeloadBase = "https://codeload.github.com"
+	gitMaterialize     = materializeGitWithRemoteFallback
+)
+
+// materializeGitHub tries an archive download first, then falls back to git.
 func (f *httpFetcher) materializeGitHub(ctx context.Context, s ParsedSource) (string, error) {
 	owner, repo, err := parseGitHubOwnerRepo(s.URL)
 	if err != nil {
@@ -20,15 +30,46 @@ func (f *httpFetcher) materializeGitHub(ctx context.Context, s ParsedSource) (st
 
 	ref := s.Ref
 	if ref == "" {
-		// GitHub codeload accepts the symbolic ref "HEAD" to mean the
+		// GitHub codeload / API accept the symbolic ref "HEAD" to mean the
 		// repository's default branch. The resulting archive uses the
 		// resolved branch name in its top-level directory (e.g. "main"),
 		// which extractTarGZ strips dynamically.
 		ref = "HEAD"
 	}
 
-	archiveURL := fmt.Sprintf("https://codeload.github.com/%s/%s/tar.gz/%s", owner, repo, url.PathEscape(ref))
-	return f.fetchArchive(ctx, archiveURL, owner+"/"+repo)
+	archiveURL, header := githubArchive(owner, repo, ref)
+	label := owner + "/" + repo
+	dir, err := f.fetchArchive(ctx, archiveURL, label, header)
+	if err == nil {
+		return dir, nil
+	}
+	// Private repos return 404 on unauthenticated codeload. Fall back to
+	// git so local credentials (SSH, gh auth, credential helper) apply.
+	gitDir, gitErr := gitMaterialize(ctx, s)
+	if gitErr == nil {
+		return gitDir, nil
+	}
+	return "", fmt.Errorf("%w; git fallback failed: %v", err, gitErr)
+}
+
+// githubArchive picks the archive URL and auth headers.
+// With GITHUB_API_TOKEN → api.github.com (works for private repos).
+// Without → codeload.github.com (public only, no auth header).
+func githubArchive(owner, repo, ref string) (string, http.Header) {
+	refPath := url.PathEscape(ref)
+	if token := githubToken(); token != "" {
+		u := fmt.Sprintf("%s/repos/%s/%s/tarball/%s", githubAPIBase, owner, repo, refPath)
+		h := make(http.Header)
+		h.Set("Authorization", "Bearer "+token)
+		h.Set("Accept", "application/vnd.github+json")
+		return u, h
+	}
+	return fmt.Sprintf("%s/%s/%s/tar.gz/%s", githubCodeloadBase, owner, repo, refPath), nil
+}
+
+// githubToken reads GITHUB_API_TOKEN.
+func githubToken() string {
+	return strings.TrimSpace(os.Getenv("GITHUB_API_TOKEN"))
 }
 
 // parseGitHubOwnerRepo extracts "owner/repo" from a GitHub URL of the form

@@ -21,14 +21,16 @@ import (
 )
 
 // fetchArchive downloads and extracts archiveURL, retrying transient
-// failures under the shared utils retry policy. The final error (if any) is wrapped with an
-// "unable to fetch <label>" prefix so callers surface a stable message.
-func (f *httpFetcher) fetchArchive(ctx context.Context, archiveURL, label string) (string, error) {
+// failures under the shared utils retry policy. Optional header values are
+// sent on every attempt (e.g. Authorization / PRIVATE-TOKEN for private
+// repos). The final error (if any) is wrapped with an "unable to fetch
+// <label>" prefix so callers surface a stable message.
+func (f *httpFetcher) fetchArchive(ctx context.Context, archiveURL, label string, header http.Header) (string, error) {
 	// Light exponential backoff (200ms, 400ms, 800ms, 1.6s) so we don't
 	// hammer a struggling endpoint; utils.Retry stops early on permanent
 	// errors (4xx) because downloadAndExtract leaves those untagged.
 	dir, err := gohttp.Retry(ctx, gohttp.DefaultRetryPolicy(), func(ctx context.Context) (string, error) {
-		return f.downloadAndExtract(ctx, archiveURL)
+		return f.downloadAndExtract(ctx, archiveURL, header)
 	})
 	if err == nil {
 		return dir, nil
@@ -42,8 +44,8 @@ func (f *httpFetcher) fetchArchive(ctx context.Context, archiveURL, label string
 // downloadAndExtract fetches the tarball once, classifies the result, and
 // returns the extracted tempdir on success. The caller decides whether to
 // retry based on the utils.Retryable tag.
-func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string) (string, error) {
-	resp, err := f.get(ctx, archiveURL)
+func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string, header http.Header) (string, error) {
+	resp, err := f.get(ctx, archiveURL, header)
 	if err != nil {
 		return "", err
 	}
@@ -72,10 +74,20 @@ func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string)
 // svc/token both retried it — sharing one classifier removes that split, at
 // the cost of archive downloads now backing off on a rate limit instead of
 // failing outright. That is what GitHub codeload actually wants.
-func (f *httpFetcher) get(ctx context.Context, rawURL string) (*http.Response, error) {
+func (f *httpFetcher) get(ctx context.Context, rawURL string, header http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, gohttp.Retryable(err)
+	}
+	for k, vs := range header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+	// GitHub's API rejects requests without a User-Agent; set a stable one
+	// when the caller did not supply their own.
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "skills-cli")
 	}
 	resp, err := f.client.Do(req)
 	if err != nil {

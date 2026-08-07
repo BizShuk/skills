@@ -30,7 +30,7 @@ func (f *httpFetcher) materializeURL(ctx context.Context, s ParsedSource) (strin
 
 	switch {
 	case strings.HasSuffix(last, ".tar.gz"), strings.HasSuffix(last, ".tgz"):
-		return f.fetchArchive(ctx, s.URL, s.URL)
+		return f.fetchArchive(ctx, s.URL, s.URL, nil)
 	case strings.HasSuffix(last, ".md"):
 		return f.fetchSkillDoc(ctx, s.URL, skillDirNameFromPath(u.Path))
 	}
@@ -42,7 +42,7 @@ func (f *httpFetcher) materializeURL(ctx context.Context, s ParsedSource) (strin
 // conventional layout the scanner already knows — skills/<name>/SKILL.md —
 // so a one-document target needs no special case downstream.
 func (f *httpFetcher) fetchSkillDoc(ctx context.Context, rawURL, name string) (string, error) {
-	resp, err := f.get(ctx, rawURL)
+	resp, err := f.get(ctx, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("unable to fetch %s: %w", rawURL, err)
 	}

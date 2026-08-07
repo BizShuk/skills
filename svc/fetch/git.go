@@ -1,15 +1,65 @@
 // git.go is the fallback for git URLs that are neither GitHub nor GitLab
-// (self-hosted GitLab, Gitea, Bitbucket, ssh remotes). There is no portable
-// archive endpoint for those, so this path shells out to `git clone`.
+// (self-hosted GitLab, Gitea, Bitbucket, ssh remotes), and the auth fallback
+// for private GitHub/GitLab repos when the HTTP archive path cannot
+// authenticate. There is no portable archive endpoint for arbitrary hosts,
+// so this path shells out to `git clone`.
 package fetch
 
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 )
+
+// materializeGitWithRemoteFallback clones s.URL; if that fails and the URL
+// is an https://github.com or https://gitlab.com remote, retries once with
+// the matching SSH form (git@host:path.git) so users who only have SSH keys
+// still succeed.
+func materializeGitWithRemoteFallback(ctx context.Context, s ParsedSource) (string, error) {
+	dir, err := materializeGit(ctx, s)
+	if err == nil {
+		return dir, nil
+	}
+	alt, ok := alternateGitSSHURL(s.URL)
+	if !ok {
+		return "", err
+	}
+	s2 := s
+	s2.URL = alt
+	dir, err2 := materializeGit(ctx, s2)
+	if err2 == nil {
+		return dir, nil
+	}
+	return "", err
+}
+
+// alternateGitSSHURL maps https://github.com/o/r.git → git@github.com:o/r.git
+// (same for gitlab.com). Other hosts and already-SSH URLs return false.
+func alternateGitSSHURL(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	host := strings.ToLower(u.Hostname())
+	switch host {
+	case "github.com", "gitlab.com":
+	default:
+		return "", false
+	}
+	path := strings.Trim(u.Path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	if path == "" || !strings.Contains(path, "/") {
+		return "", false
+	}
+	return fmt.Sprintf("git@%s:%s.git", host, path), true
+}
 
 // materializeGit shallow-clones s.URL into a fresh tempdir. The clone is
 // --depth 1 (and --single-branch) because the pipeline only ever reads the

@@ -26,8 +26,14 @@ skills add [path]
 ```
 
 `path` 是`目標 (target)`，命令會依目標種類選擇取得方式：本機路徑直接就地讀取，
-GitHub 與 GitLab 下載 repo archive，其他 git URL 以 `git clone --depth 1` 取得，
-單一 https 文件則直接下載。下列為各類目標各一行範例：
+GitHub 與 GitLab 優先下載 repo archive，其他 git URL 以 `git clone --depth 1` 取得，
+單一 https 文件則直接下載。
+
+`private repo`：GitHub 會讀 `GITHUB_API_TOKEN` 走 API archive；GitLab 會讀
+`GITLAB_TOKEN`／`PRIVATE_TOKEN`。未設定 token 或 archive 失敗時，會 fallback 到本機
+`git clone`（含 https → SSH 再試一次），因此本機已有的 git 憑證／SSH key 可直接使用。
+
+下列為各類目標各一行範例：
 
 ```bash
 skills add owner/repo
