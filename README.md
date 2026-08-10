@@ -154,6 +154,11 @@ skill，名稱取自 manifest 條目），或 repo 內以慣例的 `skills/<name
 收納多個 skill。兩種形狀取得的 skill 都會併入宣告它的 plugin 之下，而非另外
 掛成子分類 —— 因為 manifest 宣告的是「我的 skill」。
 
+來源掃描只看 repo 根目錄的 `skills/` 與 `agents/`。agent 的安裝目的地
+（`.claude/skills`、`.agents/skills`、`.claude/agents`、`.agents/agents`）
+不視為來源：那裡放的是該 repo 從別處裝進來的 skill／subagent，再次列出只會以
+錯誤的出處 (provenance) 重新散布同一份複本。
+
 ## 遞迴與並行 (Recursion)
 
 走訪位於 `svc/discover/discover.go`，採逐層 (level-by-level) BFS：root 為 depth `0`，每跨進一個 remote plugin 就 `+1`。當某個 plugin 的下一層深度大於 `--depth`（預設 `3`）時即停止走訪，不再建立對應的 Category。同一個 `owner/repo` 在單趟走訪內只會被抓取一次：`visited` set 以小寫化的 `ownerRepo` 為鍵，兼顧防環與去重；同一層內部多個 remote plugin 的 fetch 以 `errgroup` 並行執行，並以 `nextMu` 收集下一層節點，等該層全部 goroutine 完成才進入下一輪 BFS。

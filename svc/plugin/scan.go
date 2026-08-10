@@ -38,25 +38,23 @@ func scanSkills(base string, lp *model.LocalPlugin, additive []string) {
 		})
 	}
 
-	// Conventional: <lp.Base>/skills/<name>/SKILL.md, <lp.Base>/.claude/skills/<name>/SKILL.md, <lp.Base>/.agents/skills/<name>/SKILL.md
-	conventionalDirs := []string{
-		filepath.Join(lp.Base, "skills"),
-		filepath.Join(lp.Base, ".claude", "skills"),
-		filepath.Join(lp.Base, ".agents", "skills"),
-	}
-	for _, conv := range conventionalDirs {
-		if entries, err := os.ReadDir(conv); err == nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					continue
-				}
-				skillDir := filepath.Join(conv, e.Name())
-				skillFile := filepath.Join(skillDir, "SKILL.md")
-				if _, err := os.Stat(skillFile); err != nil {
-					continue
-				}
-				add(skillDir)
+	// Conventional: <lp.Base>/skills/<name>/SKILL.md — the source repo's own
+	// skills only. Agent install destinations (.claude/skills, .agents/skills)
+	// are deliberately NOT scanned: those hold skills already installed into
+	// that repo from elsewhere, and offering them again would re-publish a
+	// copy under the wrong provenance.
+	conv := filepath.Join(lp.Base, "skills")
+	if entries, err := os.ReadDir(conv); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
 			}
+			skillDir := filepath.Join(conv, e.Name())
+			skillFile := filepath.Join(skillDir, "SKILL.md")
+			if _, err := os.Stat(skillFile); err != nil {
+				continue
+			}
+			add(skillDir)
 		}
 	}
 
@@ -140,8 +138,11 @@ func hasSkillFile(dir string) bool {
 }
 
 // scanSubagents populates lp.Subagents from three sources, in order:
-//  1. The conventional agents/ subdirs (lp.Base/agents/, lp.Base/.claude/agents/,
-//     lp.Base/.agents/agents/) - always scanned.
+//  1. The conventional agents/ dir (lp.Base/agents/) - always scanned. Agent
+//     install destinations (.claude/agents, .agents/agents) are deliberately
+//     NOT scanned, for the same reason as their skills counterparts in
+//     scanSkills: they hold subagents already installed into that repo from
+//     elsewhere.
 //  2. Top-level .md files in lp.Base - only when lp.TopLevelAgents is true (set
 //     via plugin.json's "topLevelAgents" field). This handles the "flat .md"
 //     layout (e.g. awesome-claude-code-subagents where each category is a dir
@@ -170,17 +171,9 @@ func scanSubagents(lp *model.LocalPlugin) {
 		})
 	}
 
-	// Source 1: conventional agents/ subdirs.
-	agentDirs := []string{
-		filepath.Join(lp.Base, "agents"),
-		filepath.Join(lp.Base, ".claude", "agents"),
-		filepath.Join(lp.Base, ".agents", "agents"),
-	}
-	for _, ad := range agentDirs {
-		entries, err := os.ReadDir(ad)
-		if err != nil {
-			continue
-		}
+	// Source 1: the repo's own conventional agents/ dir.
+	ad := filepath.Join(lp.Base, "agents")
+	if entries, err := os.ReadDir(ad); err == nil {
 		for _, e := range entries {
 			if e.IsDir() {
 				continue

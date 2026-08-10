@@ -194,14 +194,14 @@ func TestScan_SelfMarketplaceAndPluginJsonDedup(t *testing.T) {
 	assert.Equal(t, "golang-dev", lp.Skills[0].Name)
 }
 
-// TestScan_SkillJsonOnly verifies that skill.json at root and .claude/skills conventional
-// directories are properly discovered.
+// TestScan_SkillJsonOnly verifies that skill.json at root and the conventional
+// skills/ directory are properly discovered.
 func TestScan_SkillJsonOnly(t *testing.T) {
 	base := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"ui-ux"}`), 0o644))
 
-	// Put a skill in .claude/skills/design/SKILL.md
-	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	// Put a skill in skills/design/SKILL.md
+	skillDir := filepath.Join(base, "skills", "design")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# Design\nDesc"), 0o644))
 
@@ -295,9 +295,9 @@ func TestHasAnyManifest(t *testing.T) {
 	})
 }
 
-// TestHasAnyConventionalSkillsDir verifies that the helper recognizes the
-// three conventional skills directories (skills/, .claude/skills/,
-// .agents/skills/) and ignores a file with the same name.
+// TestHasAnyConventionalSkillsDir verifies that the helper recognizes only the
+// repo's own skills/ directory — agent install destinations do not count — and
+// ignores a file with the same name.
 func TestHasAnyConventionalSkillsDir(t *testing.T) {
 	t.Run("none present", func(t *testing.T) {
 		base := t.TempDir()
@@ -310,16 +310,16 @@ func TestHasAnyConventionalSkillsDir(t *testing.T) {
 		assert.True(t, hasAnyConventionalSkillsDir(base))
 	})
 
-	t.Run("dotclaude skills only", func(t *testing.T) {
+	t.Run("dotclaude skills does not count", func(t *testing.T) {
 		base := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(base, ".claude", "skills"), 0o755))
-		assert.True(t, hasAnyConventionalSkillsDir(base))
+		assert.False(t, hasAnyConventionalSkillsDir(base))
 	})
 
-	t.Run("dotagents skills only", func(t *testing.T) {
+	t.Run("dotagents skills does not count", func(t *testing.T) {
 		base := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(base, ".agents", "skills"), 0o755))
-		assert.True(t, hasAnyConventionalSkillsDir(base))
+		assert.False(t, hasAnyConventionalSkillsDir(base))
 	})
 
 	t.Run("file with the name skills is not a directory", func(t *testing.T) {
@@ -379,8 +379,9 @@ func TestScan_NoManifest_Fallback_SkillsDir(t *testing.T) {
 	assert.Equal(t, "my-skill", parsed.Locals[0].Skills[0].Name)
 }
 
-// E2: <base>/.claude/skills/ is the conventional dir.
-func TestScan_NoManifest_Fallback_DotClaudeSkillsDir(t *testing.T) {
+// E2: <base>/.claude/skills/ is an agent INSTALL destination, not a source —
+// a repo whose only skills live there surfaces nothing.
+func TestScan_NoManifest_DotClaudeSkillsDirIgnored(t *testing.T) {
 	base := t.TempDir()
 	skillDir := filepath.Join(base, ".claude", "skills", "design")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
@@ -389,13 +390,11 @@ func TestScan_NoManifest_Fallback_DotClaudeSkillsDir(t *testing.T) {
 
 	parsed, err := Scan(base)
 	require.NoError(t, err)
-	require.Len(t, parsed.Locals, 1)
-	require.Len(t, parsed.Locals[0].Skills, 1)
-	assert.Equal(t, "design", parsed.Locals[0].Skills[0].Name)
+	assert.Empty(t, parsed.Locals)
 }
 
-// E3: <base>/.agents/skills/ is the conventional dir.
-func TestScan_NoManifest_Fallback_DotAgentsSkillsDir(t *testing.T) {
+// E3: same for <base>/.agents/skills/.
+func TestScan_NoManifest_DotAgentsSkillsDirIgnored(t *testing.T) {
 	base := t.TempDir()
 	skillDir := filepath.Join(base, ".agents", "skills", "agent-skill")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
@@ -404,9 +403,7 @@ func TestScan_NoManifest_Fallback_DotAgentsSkillsDir(t *testing.T) {
 
 	parsed, err := Scan(base)
 	require.NoError(t, err)
-	require.Len(t, parsed.Locals, 1)
-	require.Len(t, parsed.Locals[0].Skills, 1)
-	assert.Equal(t, "agent-skill", parsed.Locals[0].Skills[0].Name)
+	assert.Empty(t, parsed.Locals)
 }
 
 // E4: skills/ sitting INSIDE an agents/ subdir must NOT be picked up

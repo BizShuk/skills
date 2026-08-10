@@ -104,7 +104,7 @@ func TestScan_DescriptionReadsYAMLFrontmatter(t *testing.T) {
 	base := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"ui-ux"}`), 0o644))
 
-	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	skillDir := filepath.Join(base, "skills", "design")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	body := `---\nname: design-skill\ndescription: "This is a beautiful skill description"\n---\n# Title\nSome body text`
 	body = strings.ReplaceAll(body, "\\n", "\n")
@@ -123,7 +123,7 @@ func TestScan_DescriptionReadsYAMLFrontmatterMultiline(t *testing.T) {
 	base := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"ui-ux"}`), 0o644))
 
-	skillDir := filepath.Join(base, ".claude", "skills", "design")
+	skillDir := filepath.Join(base, "skills", "design")
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	body := `---\nname: apple-reminders\ndescription: >\n    Use when managing Apple reminders\n    on macOS.\nversion: "1.0.0"\n---\n# Title`
 	body = strings.ReplaceAll(body, "\\n", "\n")
@@ -281,4 +281,58 @@ func TestScan_AgentsFieldRejectsMissingFile(t *testing.T) {
 	lp := parsed.Locals[0]
 	require.Len(t, lp.Subagents, 1, "missing file should be skipped; only real.md should appear")
 	assert.Equal(t, "real", lp.Subagents[0].Name)
+}
+
+// TestScan_AgentInstallDirsNotScanned verifies that skills sitting in an
+// agent's install destination (.claude/skills, .agents/skills) are NOT
+// discovered — only the repo's own top-level skills/ dir is a source.
+func TestScan_AgentInstallDirsNotScanned(t *testing.T) {
+	base := t.TempDir()
+	for _, dir := range [][]string{
+		{"skills", "own-skill"},
+		{".claude", "skills", "installed-claude"},
+		{".agents", "skills", "installed-agents"},
+	} {
+		skillDir := filepath.Join(append([]string{base}, dir...)...)
+		require.NoError(t, os.MkdirAll(skillDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# x\nbody\n"), 0o644))
+	}
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+
+	var names []string
+	for _, s := range parsed.Locals[0].Skills {
+		names = append(names, s.Name)
+	}
+	assert.Equal(t, []string{"own-skill"}, names)
+}
+
+// TestScan_AgentInstallDirsNotScannedForSubagents mirrors the skills rule for
+// subagents: only the repo's own agents/ dir is a source; an agent's install
+// destination (.claude/agents, .agents/agents) is not.
+func TestScan_AgentInstallDirsNotScannedForSubagents(t *testing.T) {
+	base := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(base, "skill.json"), []byte(`{"name":"pack"}`), 0o644))
+
+	for name, dir := range map[string][]string{
+		"own-agent":        {"agents"},
+		"installed-claude": {".claude", "agents"},
+		"installed-agents": {".agents", "agents"},
+	} {
+		agentDir := filepath.Join(append([]string{base}, dir...)...)
+		require.NoError(t, os.MkdirAll(agentDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(agentDir, name+".md"), []byte("# a\nbody\n"), 0o644))
+	}
+
+	parsed, err := Scan(base)
+	require.NoError(t, err)
+	require.Len(t, parsed.Locals, 1)
+
+	var names []string
+	for _, s := range parsed.Locals[0].Subagents {
+		names = append(names, s.Name)
+	}
+	assert.Equal(t, []string{"own-agent"}, names)
 }
