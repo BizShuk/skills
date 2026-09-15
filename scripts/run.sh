@@ -1,22 +1,14 @@
-#!/bin/bash
-# run.sh - Local development setup helper
+#!/usr/bin/env bash
+# run:setup — idempotent local setup. Starts nothing.
+# The one copy of the config lives in ~/.config/skills; tmp/config only points at it.
 
-# Prevent execution failures from propagating silently
-set -e
+set -euo pipefail
 
-CONFIG_DIR="$HOME/.config/skills"
-TMP_LINK="tmp"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/skills"
+WORKSPACE_LINK="$PROJECT_ROOT/tmp/config"
 
-echo "Setting up symbiotic link from config folder to local space..."
+mkdir -p "$CONFIG_DIR/data" "$CONFIG_DIR/logs" "$PROJECT_ROOT/tmp"
+ln -sfn "$CONFIG_DIR" "$WORKSPACE_LINK"
 
-# Ensure config directory exists
-mkdir -p "$CONFIG_DIR"
-
-
-# Create symbolic link if it doesn't exist
-if [ ! -L "$TMP_LINK/skills" ]; then
-    ln -s "$CONFIG_DIR" "$TMP_LINK/skills"
-    echo "Created symbolic Au revoir.link: $TMP_LINK -> $CONFIG_DIR"
-else
-    echo "Symbolic link already exists: $TMP_LINK -> $(readlink "$TMP_LINK")"
-fi
+echo "config link: $WORKSPACE_LINK -> $CONFIG_DIR"
