@@ -73,7 +73,8 @@ project-scoped path 或外部 metadata index 前不顯示。缺少 metadata sour
 
 | Flag | 說明 |
 | --- | --- |
-| `--global` | 安裝到 user 層目錄（預設寫到 project 層） |
+| `--global` | 安裝到 user 層目錄（預設值） |
+| `--project` | 安裝到 project 層目錄（相對於當前工作目錄） |
 | `--agent` | 覆寫自動偵測，指定一或多個目標 agent（可重複） |
 | `--depth` | 遞迴最大深度（預設 `3`） |
 | `--yes` | 跳過 TUI，安裝所有偵測到的 skills 到預設 agents |
@@ -169,7 +170,7 @@ skill，名稱取自 manifest 條目），或 repo 內以慣例的 `skills/<name
 
 ## Project-level vs User-level
 
-預設模式為 project level：destination 是相對於 `cwd` 的路徑（例如 `.claude/skills`、`agents/skills`、`hermes/skills` 等）。加上 `--global` 後切換為 user level：`install.Apply` 會把 skill 複製到對應 agent 的 user skills 目錄（絕對路徑，置於 `$HOME` 下），若該目錄尚未存在則於複製時一併建立。`--agent` 可在任一模式下覆寫 TUI 預設偵測，僅安裝到列出的目標 agent。
+預設模式為 global (user level)：`install.Apply` 會把 skill 複製到對應 agent 的 user skills 目錄（絕對路徑，置於 `$HOME` 下），若該目錄尚未存在則於複製時一併建立。加上 `--project` 後切換為 project level：destination 是相對於 `cwd` 的路徑（例如 `.claude/skills`、`agents/skills`、`hermes/skills` 等）。`--agent` 可在任一模式下覆寫 TUI 預設偵測，僅安裝到列出的目標 agent。
 
 ## 設計文件 (Spec)
 

@@ -13,10 +13,13 @@ import (
 )
 
 func addCmd() *cobra.Command {
-	var global bool
-	var agents []string
-	var depth int
-	var yes bool
+	var (
+		global  bool
+		project bool
+		agents  []string
+		depth   int
+		yes     bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "add [path]",
@@ -24,6 +27,14 @@ func addCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+
+			// Scope defaults to global unless --project is explicitly specified.
+			isGlobal := true
+			if project {
+				isGlobal = false
+			} else if cmd.Flags().Changed("global") {
+				isGlobal = global
+			}
 
 			src, err := fetch.Parse(args[0])
 			if err != nil {
@@ -71,12 +82,12 @@ func addCmd() *cobra.Command {
 				for _, a := range targets {
 					sel.AgentTypes = append(sel.AgentTypes, a.Type)
 				}
-				sel.Global = global
+				sel.Global = isGlobal
 			} else {
 				// tui.Run drives the full skill/agent/level selection; its
 				// returned Selection already reflects the user's choices at
 				// every phase, so nothing further needs to be merged in.
-				sel, err = tui.Run(cat, targets, global)
+				sel, err = tui.Run(cat, targets, isGlobal)
 				if err != nil {
 					return fmt.Errorf("tui: %w", err)
 				}
@@ -99,10 +110,12 @@ func addCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&global, "global", false, "install into user-level dirs")
+	cmd.Flags().BoolVar(&global, "global", true, "install into user-level dirs (default)")
+	cmd.Flags().BoolVar(&project, "project", false, "install into project-level dirs")
 	cmd.Flags().StringSliceVar(&agents, "agent", nil, "override detected target agents")
 	cmd.Flags().IntVar(&depth, "depth", 3, "max recursion depth")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip TUI, install all detected")
+	cmd.MarkFlagsMutuallyExclusive("global", "project")
 
 	return cmd
 }

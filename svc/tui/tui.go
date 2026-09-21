@@ -150,6 +150,7 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 		skillUnfolded:   map[string]bool{},
 		viewportHeight:  defaultViewportHeight,
 		search:          textinput.New(),
+		global:          true,
 		phase:           phaseSkills,
 		agents:          makeAgents(agents),
 	}

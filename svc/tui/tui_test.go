@@ -568,6 +568,18 @@ func TestLevelPhaseDefaultsFromGlobalFlag(t *testing.T) {
 	assert.Equal(t, 1, m2.levelCursor, "levelCursor should default to the Global row (index 1) when m.global is true")
 }
 
+// TestLevelPhaseDefaultsToGlobalByDefault verifies that NewModel defaults
+// to global scope without any flag overrides.
+func TestLevelPhaseDefaultsToGlobalByDefault(t *testing.T) {
+	m := NewModel(sampleCatalog(), twoAgents())
+	assert.True(t, m.global, "NewModel should default global to true")
+
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))  // -> phaseAgents
+	m2 := mustModel(t, sendKey(m1, tea.KeyEnter)) // -> phaseLevel
+
+	assert.Equal(t, 1, m2.levelCursor, "levelCursor should default to Global row (index 1) by default")
+}
+
 // TestLevelPhaseSpaceCommitsSelection verifies that Space in the level
 // phase sets m.global to match whichever row is highlighted, and that the
 // final Selection().Global reflects that choice.
