@@ -1,11 +1,8 @@
 # TODO
 
-## Remove
-
-- [x] Add `skills remove` command (TUI + --yes + install-file sync) @2026-07-10
-
 ## Archive
 
+- [x] Add `skills remove` command (TUI + --yes + install-file sync) @2026-07-10
 - [x] Private GitHub/GitLab fetch: API token archive + git clone/SSH fallback @2026-08-07 @Completed
 - [x] Align package scope with domain folders (utils→svc/discover, model→utils, cmd/stats) @2026-08-03 @Completed
 - [x] `svc/stat` 改讀 `svc/agent/providers/` 的 `sessionDirs` @2026-08-03 @Completed
