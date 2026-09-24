@@ -10,10 +10,17 @@ import (
 // destination's parent directories are created as needed. Source directory
 // permissions (mode bits) are preserved; destination directories are created
 // 0o755 so unreadable parents don't block later installs.
+//
+// When dst already resolves to src — e.g. a project whose .claude/skills is a
+// symlink back to its own skills/ — the copy is a no-op: the content is
+// already in place, and opening dst with O_TRUNC would empty the source.
 func CopyTree(src, dst string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
+	}
+	if dstInfo, err := os.Stat(dst); err == nil && os.SameFile(info, dstInfo) {
+		return nil
 	}
 	if info.IsDir() {
 		return CopyDir(src, dst, info)
