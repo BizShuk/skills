@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 ## 專案概要 (Project Summary)
 
