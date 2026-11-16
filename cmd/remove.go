@@ -177,11 +177,12 @@ func confirmDelete(cmd *cobra.Command, items []agent.InstalledItem) bool {
 
 // syncInstallsAfterRemove drops the removed skill and subagent names from
 // the installs.json metadata, broken into per-scope buckets. Project names
-// never touch global entries (and vice versa) so a user can remove just
-// the project-scope copy without invalidating the global tracking. Entries
-// whose Skills and Subagents lists are both empty after the drop are
-// removed outright, so a later `skills update` won't try to re-install
-// into empty slots. Dropped entries are logged to stderr.
+// only touch entries of the current project; global names only touch
+// global entries. A name that still has a copy on disk at that scope (e.g.
+// --agent removed it from only some agents) stays tracked. Entries whose
+// Skills and Subagents lists are both empty after the drop are removed
+// outright, so a later `skills update` won't try to re-install into empty
+// slots. Dropped entries are logged to stderr.
 func syncInstallsAfterRemove(removed agent.RemovedNames) error {
 	if len(removed.ProjectSkills) == 0 &&
 		len(removed.ProjectSubagents) == 0 &&
@@ -189,13 +190,52 @@ func syncInstallsAfterRemove(removed agent.RemovedNames) error {
 		len(removed.GlobalSubagents) == 0 {
 		return nil
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	remaining, err := agent.DiscoverInstalled()
+	if err != nil {
+		return err
+	}
+	removed = withoutRemaining(removed, remaining)
+
 	f, err := update.Load()
 	if err != nil {
 		return err
 	}
-	dropped := update.DropNamesByScope(f, removed)
+	dropped := update.DropNamesByScope(f, removed, cwd)
 	for _, e := range dropped {
 		fmt.Fprintf(os.Stderr, "dropped install entry with no remaining items: source=%s scope=%s\n", e.Source, e.Scope)
 	}
 	return update.Save(f)
+}
+
+// withoutRemaining filters out of removed every name that still has a copy
+// on disk at the same scope and kind.
+func withoutRemaining(removed agent.RemovedNames, remaining []agent.InstalledItem) agent.RemovedNames {
+	type key struct {
+		kind  agent.InstalledKind
+		scope agent.Scope
+		name  string
+	}
+	present := make(map[key]bool, len(remaining))
+	for _, it := range remaining {
+		present[key{it.Kind, it.Scope, it.Name}] = true
+	}
+	keep := func(names []string, kind agent.InstalledKind, scope agent.Scope) []string {
+		var out []string
+		for _, n := range names {
+			if !present[key{kind, scope, n}] {
+				out = append(out, n)
+			}
+		}
+		return out
+	}
+	return agent.RemovedNames{
+		ProjectSkills:    keep(removed.ProjectSkills, agent.InstalledSkill, agent.ScopeProject),
+		ProjectSubagents: keep(removed.ProjectSubagents, agent.InstalledSubagent, agent.ScopeProject),
+		GlobalSkills:     keep(removed.GlobalSkills, agent.InstalledSkill, agent.ScopeGlobal),
+		GlobalSubagents:  keep(removed.GlobalSubagents, agent.InstalledSubagent, agent.ScopeGlobal),
+	}
 }

@@ -51,31 +51,6 @@ func TestSaveAndLoad_Roundtrip(t *testing.T) {
 	assert.False(t, e.UpdatedAt.IsZero())
 }
 
-func TestUpsert_ReplacesByKey(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
-
-	f := &InstallsFile{Version: 1}
-	// First insert.
-	Upsert(f, Entry{
-		Source:      "acme/tools",
-		ProjectPath: "/p1",
-		Scope:       ScopeProject,
-		Skills:      []string{"old"},
-	})
-	require.Len(t, f.Entries, 1)
-
-	// Second insert with same key — replaces.
-	Upsert(f, Entry{
-		Source:      "acme/tools",
-		ProjectPath: "/p1",
-		Scope:       ScopeProject,
-		Skills:      []string{"new"},
-	})
-	require.Len(t, f.Entries, 1)
-	assert.Equal(t, []string{"new"}, f.Entries[0].Skills)
-}
-
 func TestUpsert_DifferentKeyAppends(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmp)
@@ -162,100 +137,6 @@ func TestKey_Stable(t *testing.T) {
 	assert.Equal(t, "global|owner/repo|", e2.Key())
 }
 
-func TestDropNames_RemovesSkillFromOneEntry(t *testing.T) {
-	f := &InstallsFile{Version: 1}
-	Upsert(f, Entry{
-		Source:    "acme/tools",
-		Scope:     ScopeProject,
-		Skills:    []string{"writer", "helper"},
-		Subagents: []string{"reviewer"},
-	})
-	Upsert(f, Entry{
-		Source: "other/pkg",
-		Scope:  ScopeProject,
-		Skills: []string{"helper"}, // overlap on helper — both should keep helper
-	})
-
-	dropped := DropNames(f, []string{"writer"}, nil)
-	assert.Empty(t, dropped, "entries with remaining content are not 'dropped'")
-	require.Len(t, f.Entries, 2)
-
-	// First entry: writer removed, helper + reviewer kept.
-	e := f.Entries[0]
-	assert.Equal(t, "acme/tools", e.Source)
-	assert.Equal(t, []string{"helper"}, e.Skills)
-	assert.Equal(t, []string{"reviewer"}, e.Subagents)
-
-	// Second entry: untouched (writer was not in its list).
-	assert.Equal(t, "other/pkg", f.Entries[1].Source)
-	assert.Equal(t, []string{"helper"}, f.Entries[1].Skills)
-}
-
-func TestDropNames_RemovesSubagent(t *testing.T) {
-	f := &InstallsFile{Version: 1}
-	Upsert(f, Entry{
-		Source:    "acme/agents",
-		Scope:     ScopeProject,
-		Skills:    []string{"helper"},
-		Subagents: []string{"reviewer", "tester"},
-	})
-
-	DropNames(f, nil, []string{"reviewer"})
-
-	e := f.Entries[0]
-	assert.Equal(t, []string{"helper"}, e.Skills)
-	assert.Equal(t, []string{"tester"}, e.Subagents)
-}
-
-func TestDropNames_DropsEntryWhenBothListsEmpty(t *testing.T) {
-	f := &InstallsFile{Version: 1}
-	Upsert(f, Entry{
-		Source:    "acme/solo",
-		Scope:     ScopeProject,
-		Skills:    []string{"writer"},
-		Subagents: []string{"reviewer"},
-	})
-	Upsert(f, Entry{
-		Source: "other/keep",
-		Scope:  ScopeProject,
-		Skills: []string{"other"},
-	})
-
-	dropped := DropNames(f, []string{"writer"}, []string{"reviewer"})
-	require.Len(t, dropped, 1, "first entry should be dropped")
-	assert.Equal(t, "acme/solo", dropped[0].Source)
-
-	require.Len(t, f.Entries, 1)
-	assert.Equal(t, "other/keep", f.Entries[0].Source)
-}
-
-func TestDropNames_NoMatchIsNoop(t *testing.T) {
-	f := &InstallsFile{Version: 1}
-	Upsert(f, Entry{
-		Source: "acme/x",
-		Scope:  ScopeProject,
-		Skills: []string{"writer"},
-	})
-
-	dropped := DropNames(f, []string{"nonexistent"}, nil)
-	assert.Empty(t, dropped)
-	assert.Equal(t, []string{"writer"}, f.Entries[0].Skills)
-}
-
-func TestDropNames_DoesNotMutateInputSlices(t *testing.T) {
-	f := &InstallsFile{Version: 1}
-	Upsert(f, Entry{
-		Source: "acme/x",
-		Scope:  ScopeProject,
-		Skills: []string{"writer", "helper"},
-	})
-
-	input := []string{"writer"}
-	DropNames(f, input, nil)
-
-	assert.Equal(t, []string{"writer"}, input, "caller's slice must be untouched")
-}
-
 func TestDropNamesByScope_ProjectDropsOnlyProjectEntries(t *testing.T) {
 	f := &InstallsFile{Version: 1}
 	Upsert(f, Entry{
@@ -271,7 +152,7 @@ func TestDropNamesByScope_ProjectDropsOnlyProjectEntries(t *testing.T) {
 
 	dropped := DropNamesByScope(f, agent.RemovedNames{
 		ProjectSkills: []string{"writer"},
-	})
+	}, "")
 	assert.Empty(t, dropped, "project entry still has helper, must not be dropped")
 
 	require.Len(t, f.Entries, 2)
@@ -302,7 +183,7 @@ func TestDropNamesByScope_GlobalDropsOnlyGlobalEntries(t *testing.T) {
 
 	dropped := DropNamesByScope(f, agent.RemovedNames{
 		GlobalSkills: []string{"writer"},
-	})
+	}, "")
 	require.Len(t, dropped, 1, "global entry should be the only one dropped")
 	assert.Equal(t, "acme/global", dropped[0].Source)
 	assert.Equal(t, ScopeGlobal, dropped[0].Scope)
@@ -332,7 +213,7 @@ func TestDropNamesByScope_BothScopesInOneCall(t *testing.T) {
 		GlobalSubagents: []string{"reviewer"},
 		// Subagents in Project, Skills in Global → each side picks up
 		// exactly the half it owns.
-	})
+	}, "")
 	assert.Empty(t, dropped, "neither entry ends up empty after partial drops")
 
 	require.Len(t, f.Entries, 2)
@@ -364,7 +245,7 @@ func TestDropNamesByScope_DropsEntriesLeftEmpty(t *testing.T) {
 	dropped := DropNamesByScope(f, agent.RemovedNames{
 		ProjectSkills: []string{"writer"},
 		GlobalSkills:  []string{"helper"},
-	})
+	}, "")
 	require.Len(t, dropped, 2, "both entries should be dropped")
 	require.Empty(t, f.Entries)
 }
@@ -377,7 +258,7 @@ func TestDropNamesByScope_EmptyNamesIsNoop(t *testing.T) {
 		Skills: []string{"writer"},
 	})
 
-	dropped := DropNamesByScope(f, agent.RemovedNames{})
+	dropped := DropNamesByScope(f, agent.RemovedNames{}, "")
 	assert.Empty(t, dropped)
 	assert.Equal(t, []string{"writer"}, f.Entries[0].Skills)
 }
@@ -425,4 +306,30 @@ func TestStorePathStaysAbsoluteAndIsolated(t *testing.T) {
 		"storePath() = %q — a relative path would resolve against the caller's cwd", got)
 	assert.True(t, strings.HasPrefix(got, tmp),
 		"storePath() = %q, want it under the test's XDG_CONFIG_HOME %q", got, tmp)
+}
+
+func TestDropNamesByScope_OtherProjectUntouched(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{Source: "s", Scope: ScopeProject, ProjectPath: "/a", Skills: []string{"writer"}})
+	Upsert(f, Entry{Source: "s", Scope: ScopeProject, ProjectPath: "/b", Skills: []string{"writer"}})
+
+	dropped := DropNamesByScope(f, agent.RemovedNames{ProjectSkills: []string{"writer"}}, "/a")
+	require.Len(t, dropped, 1)
+	assert.Equal(t, "/a", dropped[0].ProjectPath)
+	require.Len(t, f.Entries, 1)
+	assert.Equal(t, "/b", f.Entries[0].ProjectPath)
+	assert.Equal(t, []string{"writer"}, f.Entries[0].Skills)
+}
+
+func TestUpsert_MergesSameKey(t *testing.T) {
+	f := &InstallsFile{Version: 1}
+	Upsert(f, Entry{Source: "s", Scope: ScopeGlobal, Agents: []string{"claude"}, Skills: []string{"a", "b"}, Depth: 3})
+	Upsert(f, Entry{Source: "s", Scope: ScopeGlobal, Agents: []string{"codex"}, Skills: []string{"b", "c"}, Subagents: []string{"r"}, Depth: 5})
+
+	require.Len(t, f.Entries, 1)
+	e := f.Entries[0]
+	assert.Equal(t, []string{"claude", "codex"}, e.Agents)
+	assert.Equal(t, []string{"a", "b", "c"}, e.Skills)
+	assert.Equal(t, []string{"r"}, e.Subagents)
+	assert.Equal(t, 5, e.Depth)
 }

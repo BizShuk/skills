@@ -6,6 +6,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mitchellh/go-homedir"
 )
@@ -95,8 +96,8 @@ func SkillNameFromPath(path string) string {
 	return filepath.Base(path)
 }
 
-// SubagentNameFromPath returns the basename of a subagent path (the .md filename
-// without its parent directory).
+// SubagentNameFromPath returns the subagent name of a .md path: its basename
+// without the .md extension, matching the name DiscoverInstalled reports.
 func SubagentNameFromPath(path string) string {
-	return filepath.Base(path)
+	return strings.TrimSuffix(filepath.Base(path), ".md")
 }

@@ -113,20 +113,41 @@ func Save(f *InstallsFile) error {
 	return os.Rename(tmp, p)
 }
 
-// Upsert inserts or replaces an entry in the file by its composite key
-// (scope + source + projectPath). It returns the updated file which the
-// caller should Save.
+// Upsert merges e into the entry with the same composite key (scope +
+// source + projectPath): Agents, Skills and Subagents become the union of
+// both, Depth takes the new value. A new key is appended. It returns the
+// updated file which the caller should Save.
 func Upsert(f *InstallsFile, e Entry) *InstallsFile {
 	key := e.Key()
 	e.UpdatedAt = time.Now()
 	for i := range f.Entries {
 		if f.Entries[i].Key() == key {
+			old := f.Entries[i]
+			e.Agents = union(old.Agents, e.Agents)
+			e.Skills = union(old.Skills, e.Skills)
+			e.Subagents = union(old.Subagents, e.Subagents)
 			f.Entries[i] = e
 			return f
 		}
 	}
 	f.Entries = append(f.Entries, e)
 	return f
+}
+
+// union returns a followed by the elements of b not already in a.
+func union(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, n := range list {
+			if _, dup := seen[n]; dup {
+				continue
+			}
+			seen[n] = struct{}{}
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Remove deletes one entry by its composite key. It returns true if an
@@ -146,53 +167,15 @@ func Remove(f *InstallsFile, e Entry) ([]Entry, bool) {
 	return f.Entries, removed
 }
 
-// DropNames removes the given skill and subagent names from every entry's
-// Skills / Subagents lists. Entries that end up with both lists empty are
-// removed outright, so a future `skills update` run won't re-fetch a source
-// that no longer has anything to install. The returned slice is the entries
-// that were dropped, in their original form (before the drop), so callers
-// can log them.
-//
-// Equality is exact-string. An entry that tracked "writer" is not matched
-// by "writer-2". Sets rather than lists: passing the same name twice is
-// harmless.
-//
-// DropNames mutates f.Entries in place; the caller is expected to Save.
-func DropNames(f *InstallsFile, removedSkills, removedSubagents []string) []Entry {
-	skillSet := make(map[string]struct{}, len(removedSkills))
-	for _, n := range removedSkills {
-		skillSet[n] = struct{}{}
-	}
-	saSet := make(map[string]struct{}, len(removedSubagents))
-	for _, n := range removedSubagents {
-		saSet[n] = struct{}{}
-	}
-
-	var dropped []Entry
-	kept := make([]Entry, 0, len(f.Entries))
-	for _, e := range f.Entries {
-		newSkills := filterOut(e.Skills, skillSet)
-		newSubagents := filterOut(e.Subagents, saSet)
-		if len(newSkills) == 0 && len(newSubagents) == 0 {
-			dropped = append(dropped, e)
-			continue
-		}
-		e.Skills = newSkills
-		e.Subagents = newSubagents
-		kept = append(kept, e)
-	}
-	f.Entries = kept
-	return dropped
-}
-
-// DropNamesByScope is the section-aware counterpart of DropNames used by
-// `skills remove`. It takes a removed-names record broken into four
+// DropNamesByScope is used by `skills remove`. It takes a removed-names record broken into four
 // per-scope buckets (project skills, project subagents, global skills,
 // global subagents) and drops each set from entries whose Scope matches:
 // project names never touch global entries, and global names never touch
 // project entries. This means a single `remove` invocation can take out a
 // project-scope install without invalidating the global entry that
-// tracks the same name at the user level.
+// tracks the same name at the user level. Project names only touch
+// project entries whose ProjectPath equals projectPath, so removing from
+// one project leaves other projects' entries intact.
 //
 // Entries that end up with both lists empty are removed outright. The
 // returned slice is the entries that were dropped, in their original
@@ -200,7 +183,7 @@ func DropNames(f *InstallsFile, removedSkills, removedSubagents []string) []Entr
 //
 // DropNamesByScope mutates f.Entries in place; the caller is expected to
 // Save.
-func DropNamesByScope(f *InstallsFile, names agent.RemovedNames) []Entry {
+func DropNamesByScope(f *InstallsFile, names agent.RemovedNames, projectPath string) []Entry {
 	projSkillSet := make(map[string]struct{}, len(names.ProjectSkills))
 	for _, n := range names.ProjectSkills {
 		projSkillSet[n] = struct{}{}
@@ -224,6 +207,10 @@ func DropNamesByScope(f *InstallsFile, names agent.RemovedNames) []Entry {
 		var skillSet, saSet map[string]struct{}
 		switch e.Scope {
 		case ScopeProject:
+			if e.ProjectPath != projectPath {
+				kept = append(kept, e)
+				continue
+			}
 			skillSet, saSet = projSkillSet, projSASet
 		case ScopeGlobal:
 			skillSet, saSet = globSkillSet, globSASet

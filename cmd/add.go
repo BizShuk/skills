@@ -57,9 +57,11 @@ func addCmd() *cobra.Command {
 					byName[a.Type] = a
 				}
 				for _, name := range agents {
-					if a, ok := byName[agent.AgentType(name)]; ok {
-						targets = append(targets, a)
+					a, ok := byName[agent.AgentType(name)]
+					if !ok {
+						return fmt.Errorf("unknown agent %q", name)
 					}
+					targets = append(targets, a)
 				}
 			case yes:
 				// Non-interactive: install into whatever's already detected.
@@ -102,7 +104,7 @@ func addCmd() *cobra.Command {
 			}
 
 			// Record install metadata for future "skills update".
-			recordInstall(args[0], sel)
+			recordInstall(args[0], sel, depth)
 
 			fmt.Fprintf(cmd.OutOrStdout(), "installed %d skill(s), %d subagent(s) into %d agent(s)\n",
 				len(sel.SkillPaths), len(sel.SubagentPaths), len(sel.AgentTypes))
@@ -122,7 +124,7 @@ func addCmd() *cobra.Command {
 
 // recordInstall persists the install metadata so "skills update" can
 // reproduce this installation later.
-func recordInstall(source string, sel agent.Selection) {
+func recordInstall(source string, sel agent.Selection, depth int) {
 	f, err := update.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot load installs file: %v\n", err)
@@ -161,7 +163,7 @@ func recordInstall(source string, sel agent.Selection) {
 		ProjectPath: cwd,
 		Agents:      agentNames,
 		Scope:       scope,
-		Depth:       3, // default depth; not currently plumbed from sel
+		Depth:       depth,
 		Skills:      skillNames,
 		Subagents:   subagentNames,
 	})

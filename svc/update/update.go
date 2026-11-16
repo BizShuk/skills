@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/bizshuk/skills/svc/agent"
 	"github.com/bizshuk/skills/svc/discover"
@@ -28,6 +29,7 @@ func Run(args []string) error {
 
 	var keep []Entry
 	for _, e := range f.Entries {
+		e := e
 		if e.Scope == ScopeProject {
 			if _, err := os.Stat(e.ProjectPath); os.IsNotExist(err) {
 				fmt.Printf("[ERROR] project %s not found — entry removed (source: %s)\n", e.ProjectPath, e.Source)
@@ -35,7 +37,7 @@ func Run(args []string) error {
 			}
 		}
 
-		if err := updateEntry(e); err != nil {
+		if err := updateEntry(&e); err != nil {
 			fmt.Printf("[ERROR] %s: %v\n", e.ProjectPath, err)
 			keep = append(keep, e) // keep even on failure so user can retry
 			continue
@@ -56,8 +58,11 @@ func Run(args []string) error {
 	return nil
 }
 
-// updateEntry re-discovers and re-installs one tracked entry.
-func updateEntry(e Entry) error {
+// updateEntry re-discovers and re-installs the skills and subagents one
+// entry tracks. Items no longer offered by the source are dropped from the
+// entry; untracked items in the source are left alone, so `skills remove`
+// stays effective across updates. e is updated in place.
+func updateEntry(e *Entry) error {
 	ctx := context.Background()
 
 	// Parse the original source.
@@ -72,17 +77,28 @@ func updateEntry(e Entry) error {
 		return fmt.Errorf("discover: %w", err)
 	}
 
-	// Collect all skills and subagents (--yes semantics: install everything).
-	allSkills := cat.AllSkills()
-	allSubagents := cat.AllSubagents()
-
-	var skillPaths []string
-	for _, s := range allSkills {
-		skillPaths = append(skillPaths, s.Path)
+	tracked := func(names []string) map[string]bool {
+		m := make(map[string]bool, len(names))
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
 	}
-	var subagentPaths []string
-	for _, sa := range allSubagents {
-		subagentPaths = append(subagentPaths, sa.Path)
+	trackedSkills, trackedSubagents := tracked(e.Skills), tracked(e.Subagents)
+
+	var skillPaths, skillNames []string
+	for _, s := range cat.AllSkills() {
+		if name := agent.SkillNameFromPath(s.Path); trackedSkills[name] {
+			skillPaths = append(skillPaths, s.Path)
+			skillNames = append(skillNames, name)
+		}
+	}
+	var subagentPaths, subagentNames []string
+	for _, sa := range cat.AllSubagents() {
+		if name := agent.SubagentNameFromPath(sa.Path); trackedSubagents[name] {
+			subagentPaths = append(subagentPaths, sa.Path)
+			subagentNames = append(subagentNames, name)
+		}
 	}
 
 	// Resolve agent types.
@@ -116,15 +132,8 @@ func updateEntry(e Entry) error {
 		return fmt.Errorf("install: %w", err)
 	}
 
-	// Update recorded skills/subagents.
-	e.Skills = make([]string, 0, len(allSkills))
-	for _, s := range allSkills {
-		e.Skills = append(e.Skills, s.Name)
-	}
-	e.Subagents = make([]string, 0, len(allSubagents))
-	for _, sa := range allSubagents {
-		e.Subagents = append(e.Subagents, sa.Name)
-	}
-
+	e.Skills = skillNames
+	e.Subagents = subagentNames
+	e.UpdatedAt = time.Now()
 	return nil
 }
