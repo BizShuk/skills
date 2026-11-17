@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 
+	"github.com/bizshuk/skills/svc/agent"
+	"github.com/bizshuk/skills/svc/update"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,4 +25,20 @@ func TestAddCmdFlags(t *testing.T) {
 	cmd.SetArgs([]string{"some-path", "--global", "--project"})
 	err := cmd.Execute()
 	assert.Error(t, err)
+}
+
+func TestRecordInstall_NormalizesLocalRelativeSource(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	recordInstall(".", agent.Selection{
+		SkillPaths: []string{"/tmp/skills/inf-spec"},
+		AgentTypes: []agent.AgentType{"claude-code"},
+		Global:     true,
+	}, 3)
+
+	f, err := update.Load()
+	require.NoError(t, err)
+	require.Len(t, f.Entries, 1)
+	assert.True(t, filepath.IsAbs(f.Entries[0].Source), "local relative source should be stored as absolute path, got %q", f.Entries[0].Source)
+	assert.NotEqual(t, ".", f.Entries[0].Source)
 }

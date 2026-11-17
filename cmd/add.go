@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/bizshuk/skills/svc/agent"
 	"github.com/bizshuk/skills/svc/discover"
@@ -135,6 +136,12 @@ func recordInstall(source string, sel agent.Selection, depth int) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot resolve cwd: %v\n", err)
 		return
+	}
+
+	if fetch.IsLocalPath(source) {
+		if abs, err := filepath.Abs(source); err == nil {
+			source = abs
+		}
 	}
 
 	scope := update.ScopeProject
