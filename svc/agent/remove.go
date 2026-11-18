@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 )
 
 // RemoveSelection is the input to Remove: which items the user picked in
@@ -96,4 +97,49 @@ func removeLocation(kind InstalledKind, path string) error {
 		return removeErr
 	}
 	return nil
+}
+
+// ProjectRemoveSelection builds the RemoveSelection for the named skills
+// and subagents in the project rooted at cwd, one location per agent type.
+// Locations mirror where Apply installs in project mode.
+func ProjectRemoveSelection(cwd string, types []AgentType, skills, subagents []string) RemoveSelection {
+	byType := make(map[AgentType]Agent)
+	for _, a := range Agents() {
+		byType[a.Type] = a
+	}
+	anchor := func(dir string) string {
+		if filepath.IsAbs(dir) {
+			return dir
+		}
+		return filepath.Join(cwd, dir)
+	}
+	item := func(name string, kind InstalledKind) InstalledItem {
+		it := InstalledItem{Name: name, Kind: kind, Scope: ScopeProject}
+		for _, t := range types {
+			a, ok := byType[t]
+			if !ok {
+				continue
+			}
+			var path string
+			switch {
+			case kind == InstalledSkill && a.ProjectSkillsDir != "":
+				path = filepath.Join(anchor(a.ProjectSkillsDir), name)
+			case kind == InstalledSubagent && a.ProjectAgentsDir != "":
+				path = filepath.Join(anchor(a.ProjectAgentsDir), name+".md")
+			default:
+				continue
+			}
+			it.Locations = append(it.Locations, InstalledLocation{Agent: t, Path: path})
+		}
+		return it
+	}
+
+	var sel RemoveSelection
+	for _, n := range skills {
+		sel.Items = append(sel.Items, item(n, InstalledSkill))
+	}
+	for _, n := range subagents {
+		sel.Items = append(sel.Items, item(n, InstalledSubagent))
+	}
+	return sel
 }

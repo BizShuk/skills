@@ -519,3 +519,14 @@ func TestScan_NoManifest_SkillsAtBFSMidLevel_NoFallback(t *testing.T) {
 	require.Len(t, parsed.Locals[0].Skills, 1)
 	assert.Equal(t, "leaf", parsed.Locals[0].Skills[0].Name)
 }
+
+func TestCatalog_Complete(t *testing.T) {
+	ok := &Catalog{Roots: []*Category{{FetchOK: true, Children: []*Category{{FetchOK: true}}}}}
+	assert.True(t, ok.Complete())
+
+	failedChild := &Catalog{Roots: []*Category{{FetchOK: true, Children: []*Category{{FetchOK: false}}}}}
+	assert.False(t, failedChild.Complete(), "an unreachable nested plugin makes the catalog incomplete")
+
+	var none *Catalog
+	assert.False(t, none.Complete())
+}

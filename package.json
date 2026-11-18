@@ -10,7 +10,7 @@
     "deploy": "go install .",
     "lint": "gofmt -l . && go vet ./...",
     "clean": "rm -rf bin",
-    "destroy": "pm2 delete \"Skills Auto-Update\" || true",
+    "destroy": "pm2 delete \"Skills Auto Update - Daily\" || true",
     "run:setup": "./scripts/run.sh"
   }
 }

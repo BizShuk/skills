@@ -78,3 +78,33 @@ func (c *Catalog) AllSubagents() []model.Subagent {
 	}
 	return out
 }
+
+// Complete reports whether every plugin in the tree was fetched. A skill
+// missing from an incomplete catalog may only be unreachable for now, so
+// callers must not treat its absence as removal from the source.
+func (c *Catalog) Complete() bool {
+	if c == nil {
+		return false
+	}
+	var walk func(n *Category) bool
+	walk = func(n *Category) bool {
+		if n == nil {
+			return true
+		}
+		if !n.FetchOK {
+			return false
+		}
+		for _, ch := range n.Children {
+			if !walk(ch) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, r := range c.Roots {
+		if !walk(r) {
+			return false
+		}
+	}
+	return true
+}
