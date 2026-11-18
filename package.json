@@ -1,5 +1,5 @@
 {
-  "name": "skills",
+  "name": "skills-cli",
   "version": "0.0.0",
   "private": true,
   "description": "skills CLI (Go)：安裝／移除 skill、subagent 與全域規則，並查詢 agent session 與 token 統計",
