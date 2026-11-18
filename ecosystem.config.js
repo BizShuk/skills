@@ -1,6 +1,6 @@
 module.exports = {
     apps: [
-        // Skills Auto-Update (Local)
+        // Daily 19:00 update of locally installed Claude skills.
         {
             name: "Skills Auto-Update",
             script: "skills",
