@@ -138,7 +138,7 @@ skill，名稱取自 manifest 條目），或 repo 內以慣例的 `skills/<name
 
 ## 設計文件 (Spec)
 
-設計規格請見 `docs/specs/2026-07-04-skills-add-golang-design.md`。
+設計規格請見 [docs/specs/2026-11-19-Summary.md](docs/specs/2026-11-19-Summary.md)。
 
 ## `skills remove`
 
