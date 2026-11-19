@@ -43,3 +43,4 @@ logs
 .opencode/
 .vscode/
 node_modules/
+pnpm-lock.yaml
