@@ -42,3 +42,4 @@ logs
 .gemini/
 .opencode/
 .vscode/
+node_modules/
