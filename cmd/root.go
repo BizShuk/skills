@@ -14,7 +14,6 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{Use: "skills", SilenceUsage: true}
 
 	root.AddCommand(addCmd())
-	root.AddCommand(installCmd())
 	root.AddCommand(updateCmd())
 	root.AddCommand(removeCmd())
 	root.AddCommand(statsCmd())

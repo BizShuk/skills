@@ -5,7 +5,6 @@
   "userSkillsDir": "~/.gemini/antigravity-cli/skills",
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.gemini/antigravity-cli/agents",
-  "globalRulePath": "~/.gemini/GEMINI.md",
   "detectDir": "~/.gemini/antigravity-cli",
   "sessionDirs": ["~/.gemini/antigravity-cli/brain"]
 }

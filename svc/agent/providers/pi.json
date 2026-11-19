@@ -5,7 +5,6 @@
   "userSkillsDir": "~/.pi/skills",
   "projectAgentsDir": ".pi/agents",
   "userAgentsDir": "~/.pi/agents",
-  "globalRulePath": "~/.pi/agent/AGENTS.md",
   "detectDir": "~/.pi",
   "sessionDirs": ["~/.pi/agent/sessions"]
 }

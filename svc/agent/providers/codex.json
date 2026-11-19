@@ -5,7 +5,6 @@
   "userSkillsDir": "~/.agents/skills",
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.agents/agents",
-  "globalRulePath": "~/.codex/AGENTS.md",
   "detectDir": "~/.codex",
   "sessionDirs": [
     "~/.codex/sessions",

@@ -2,7 +2,7 @@
 
 ## 專案概要 (Project Summary)
 
-本專案是以 Go 語言重寫的 `skills add/remove/install` 工具，專為不同代理器 (agent) 挑選並安裝技能 (skill)、子代理器 (subagent) 與全域規則 (global rule)。
+本專案是以 Go 語言重寫的 `skills add/remove/update` 工具，專為不同代理器 (agent) 挑選並安裝技能 (skill) 與子代理器 (subagent)。
 
 ## 常用開發指令 (Development Commands)
 
@@ -37,12 +37,12 @@
 ### 單一事實來源 (Single Source of Truth)
 
 - `agent 安裝位置與 session 路徑`：`svc/agent/providers/*.json`，以 `go:embed` 內嵌。
-  session roots 由 `sessionDirs` 設定，全域規則路徑由 `globalRulePath` 設定。
+  session roots 由 `sessionDirs` 設定。
   `svc/session` 與 `svc/stat` 一律經 `agent.Agents()` 取得，不得自行硬寫路徑；
   `svc/stat` 的 `sources.*` viper key 僅作`覆寫`，不是來源。
 - `重試語意 (retry)`：`github.com/bizshuk/gosdk/http`（慣例別名 `gohttp`）的
   `Retry` / `Retryable` / `IsRetryable` / `IsRetryableStatus` / `RetryPolicy`。
-  `svc/fetch`、`svc/rule`、`svc/token` 共用同一份 5 次指數退避政策與同一套
+  `svc/fetch`、`svc/token` 共用同一份 5 次指數退避政策與同一套
   429／5xx 判定，各 package 不得自行實作重試迴圈或自行列舉可重試狀態碼。
 - `應用資料目錄`：`utils.AppDataDir("skills")`（`~/.config/skills/data`）。
   `svc/update` 的 `installs.json` 與 `svc/stat` 的統計快取都落在此。

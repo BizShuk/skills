@@ -2,7 +2,7 @@
 
 ## 簡介 (Intro)
 
-本文件說明 `golang` 分支上的 `skills` 命令列工具，這是以 Go 重寫 `skills add [path]` 後的版本，位於 module `github.com/bizshuk/skills`，原始入口為 repo 根目錄的 `main.go`。CLI 提供 skill、subagent 與全域規則安裝、移除，以及 agent session 查詢。
+本文件說明 `golang` 分支上的 `skills` 命令列工具，這是以 Go 重寫 `skills add [path]` 後的版本，位於 module `github.com/bizshuk/skills`，原始入口為 repo 根目錄的 `main.go`。CLI 提供 skill、subagent 安裝、移除，以及 agent session 查詢。
 
 ## Build
 
@@ -79,57 +79,21 @@ project-scoped path 或外部 metadata index 前不顯示。缺少 metadata sour
 | `--depth` | 遞迴最大深度（預設 `3`） |
 | `--yes` | 跳過 TUI，安裝所有偵測到的 skills 到預設 agents |
 
-## `skills install`
-
-將全域規則 (global rule) 安裝到選定 agent 的 user-level 規則檔：
-
-```bash
-skills install
-skills install https://example.com/team/AGENTS.md
-skills install --agent codex
-skills install --agent antigravity,antigravity-cli --yes
-skills install --yes
-```
-
-URL 為可選參數；未指定時使用：
-
-```text
-https://raw.githubusercontent.com/BizShuk/cc-plugin/refs/heads/master/config/CLAUDE.global.md
-```
-
-互動模式會顯示所有已知 agent，並預先勾選本機偵測到的 agent。`--agent`
-可重複使用或以逗號分隔，會把選擇清單限縮到指定 agent；搭配 `--yes` 時直接
-安裝到指定 agent。只使用 `--yes` 時，則直接安裝到所有偵測到的 agent。
-
-命令只下載來源一次，保持回應 bytes 不變，再依 provider 的
-`globalRulePath` 寫入。多個 agent 共用相同路徑時只寫入一次，例如
-`antigravity` 與 `antigravity-cli` 都使用 `~/.gemini/GEMINI.md`。既有檔案或
-symlink 會由同目錄的原子替換 (atomic replace) 直接覆寫，不建立備份；需要
-更新內容時重新執行同一命令即可。此命令不會寫入 skill 安裝紀錄
-`installs.json`。
-
-`skills install` 支援的 flag：
-
-| Flag | 說明 |
-| --- | --- |
-| `--agent` | 限縮到指定 agent（可重複或以逗號分隔） |
-| `--yes` | 跳過 TUI，安裝到指定或已偵測的 agent |
-
 ## 支援的 Agents
 
-`svc/agent/providers/` 內建 8 個支援目標，安裝位置、全域規則路徑與偵測方式
+`svc/agent/providers/` 內建 8 個支援目標，安裝位置與偵測方式
 如下（`~` 為 `$HOME`）：
 
-| Agent | project skills | user skills | project agents | user agents | global rule | 偵測方式 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `claude-code` | `.claude/skills` | `~/.claude/skills` | `.claude/agents` | `~/.claude/agents` | `~/.claude/CLAUDE.md` | `~/.claude` 目錄存在 |
-| `antigravity` | `.agents/skills` | `~/.gemini/antigravity/skills` | `.agents/agents` | `~/.gemini/antigravity/agents` | `~/.gemini/GEMINI.md` | `~/.gemini/antigravity` 目錄存在 |
-| `antigravity-cli` | `.agents/skills` | `~/.gemini/antigravity-cli/skills` | `.agents/agents` | `~/.gemini/antigravity-cli/agents` | `~/.gemini/GEMINI.md` | `~/.gemini/antigravity-cli` 目錄存在 |
-| `codex` | `.agents/skills` | `~/.agents/skills` | `.agents/agents` | `~/.agents/agents` | `~/.codex/AGENTS.md` | `~/.codex` 目錄存在 |
-| `opencode` | `.agents/skills` | `~/.config/opencode/skills` | `.agents/agents` | `~/.config/opencode/agents` | `~/.config/opencode/AGENTS.md` | `~/.config/opencode` 目錄存在 |
-| `hermes-agent` | `.hermes/skills` | `~/.hermes/skills` | `.hermes/agents` | `~/.hermes/agents` | `~/.hermes/AGENTS.md` | `~/.hermes` 目錄存在 |
-| `grok` | `.grok/skills` | `~/.grok/skills` | `.grok/agents` | `~/.grok/agents` | `~/.grok/rules/CLAUDE.global.md` | `~/.grok` 目錄存在 |
-| `pi` | `.pi/skills` | `~/.pi/skills` | `.pi/agents` | `~/.pi/agents` | `~/.pi/agent/AGENTS.md` | `~/.pi` 目錄存在 |
+| Agent | project skills | user skills | project agents | user agents | 偵測方式 |
+| --- | --- | --- | --- | --- | --- |
+| `claude-code` | `.claude/skills` | `~/.claude/skills` | `.claude/agents` | `~/.claude/agents` | `~/.claude` 目錄存在 |
+| `antigravity` | `.agents/skills` | `~/.gemini/antigravity/skills` | `.agents/agents` | `~/.gemini/antigravity/agents` | `~/.gemini/antigravity` 目錄存在 |
+| `antigravity-cli` | `.agents/skills` | `~/.gemini/antigravity-cli/skills` | `.agents/agents` | `~/.gemini/antigravity-cli/agents` | `~/.gemini/antigravity-cli` 目錄存在 |
+| `codex` | `.agents/skills` | `~/.agents/skills` | `.agents/agents` | `~/.agents/agents` | `~/.codex` 目錄存在 |
+| `opencode` | `.agents/skills` | `~/.config/opencode/skills` | `.agents/agents` | `~/.config/opencode/agents` | `~/.config/opencode` 目錄存在 |
+| `hermes-agent` | `.hermes/skills` | `~/.hermes/skills` | `.hermes/agents` | `~/.hermes/agents` | `~/.hermes` 目錄存在 |
+| `grok` | `.grok/skills` | `~/.grok/skills` | `.grok/agents` | `~/.grok/agents` | `~/.grok` 目錄存在 |
+| `pi` | `.pi/skills` | `~/.pi/skills` | `.pi/agents` | `~/.pi/agents` | `~/.pi` 目錄存在 |
 
 未帶 `--agent` 時，`agent.Detect()` 以各 agent 的 home 目錄是否存在判定目前
 已安裝的 agent，並在 TUI 中預先勾選。

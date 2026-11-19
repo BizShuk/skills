@@ -70,8 +70,8 @@ func (f *httpFetcher) downloadAndExtract(ctx context.Context, archiveURL string,
 // transient; every other 4xx is permanent. The body of a non-2xx response is
 // drained and closed so the connection can be reused.
 //
-// 429 used to fall through to the permanent branch here while svc/rule and
-// svc/token both retried it — sharing one classifier removes that split, at
+// 429 used to fall through to the permanent branch here while svc/token
+// retried it — sharing one classifier removes that split, at
 // the cost of archive downloads now backing off on a rate limit instead of
 // failing outright. That is what GitHub codeload actually wants.
 func (f *httpFetcher) get(ctx context.Context, rawURL string, header http.Header) (*http.Response, error) {
