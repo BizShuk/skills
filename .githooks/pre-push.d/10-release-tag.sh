@@ -29,6 +29,7 @@
 # 契約：git 從 stdin 餵 <local_ref> <local_sha> <remote_ref> <remote_sha>，
 #       一行一個 ref；args 是 <remote-name> <remote-url>。
 #       本 hook 永遠 exit 0，不 reject push。
+#       tag 推送成功時以 scripts/notify.sh 通知 (`<tag> Released`)。
 
 set -uo pipefail
 
@@ -41,6 +42,7 @@ readonly PACKAGE_FILE="package.json"
 readonly RELEASE_BRANCH="master"
 
 note() { echo "pre-push: $1" >&2; }
+notify="$(dirname "$0")/../scripts/notify.sh"
 
 # 只接受 stable SemVer 核心版本；數字欄位除了 0 以外不得有前導零。
 is_version() {
@@ -160,6 +162,7 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
 
 	if git push --quiet "$remote" "refs/tags/${tag}"; then
 		note "已推送 ${tag} 至 ${remote}"
+		"$notify" "$(git rev-parse --show-toplevel)" "${tag} Released" || true
 	else
 		note "推送 ${tag} 失敗；tag 留在本地，可稍後手動 git push ${remote} ${tag}"
 	fi
