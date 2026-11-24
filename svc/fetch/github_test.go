@@ -133,9 +133,9 @@ func TestFetchArchiveSendsCustomHeaders(t *testing.T) {
 
 func TestAlternateGitSSHURL(t *testing.T) {
 	tests := []struct {
-		in      string
-		want    string
-		wantOK  bool
+		in     string
+		want   string
+		wantOK bool
 	}{
 		{"https://github.com/o/r.git", "git@github.com:o/r.git", true},
 		{"https://github.com/o/r", "git@github.com:o/r.git", true},
