@@ -61,7 +61,7 @@ const (
 )
 
 // agentRow is one line in the agent-selection phase. When multiple agents
-// share the same install location (ProjectSkillsDir + ProjectAgentsDir),
+// share the same install location for the active scope (Project or Global),
 // they're collapsed into a single row so the user toggles them as one —
 // checking the row installs into the shared directory for every member.
 // Members of a singleton row are stored in a 1-element slice.
@@ -117,8 +117,9 @@ type Model struct {
 	skillUnfolded   map[string]bool           // unfolded state keyed by Skill.Path
 
 	// Agent-phase fields.
-	phase       int        // phaseSkills, phaseAgents, or phaseLevel
-	agents      []agentRow // agent list for phase 2
+	phase       int           // phaseSkills, phaseAgents, or phaseLevel
+	rawAgents   []agent.Agent // ungrouped agents for re-grouping when global changes
+	agents      []agentRow    // agent list for phase 2
 	agentCursor int
 	agentOffset int
 
@@ -142,6 +143,10 @@ type Model struct {
 //
 // Agent phase: agents are shown in phase 2 with detected agents pre-checked.
 func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
+	return newModelWithScope(cat, agents, true)
+}
+
+func newModelWithScope(cat *plugin.Catalog, agents []agent.Agent, global bool) Model {
 	m := Model{
 		cat:             cat,
 		folded:          map[*plugin.Category]bool{},
@@ -150,9 +155,10 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 		skillUnfolded:   map[string]bool{},
 		viewportHeight:  defaultViewportHeight,
 		search:          textinput.New(),
-		global:          true,
+		global:          global,
 		phase:           phaseSkills,
-		agents:          makeAgents(agents),
+		rawAgents:       agents,
+		agents:          makeAgents(agents, global),
 	}
 	m.search.Prompt = ""
 	m.search.Placeholder = ""
@@ -177,24 +183,24 @@ func NewModel(cat *plugin.Catalog, agents []agent.Agent) Model {
 }
 
 // makeAgents builds the agent row list, grouping agents that share the
-// same install location so the user sees one checkbox per directory
-// instead of one per agent type. detected marks whether any member's
-// DetectDir exists on disk (used for the "(detected)" suffix); checked
-// marks whether any member's DetectDir is detected on disk. Input order
-// is preserved across groups; within a group, members keep the order they
-// appeared in the input slice.
-func makeAgents(agents []agent.Agent) []agentRow {
+// same install location for the given scope (User*Dir when global is true
+// and configured, otherwise Project*Dir) so the user sees one checkbox per
+// directory instead of one per agent type. detected marks whether any
+// member's DetectDir exists on disk; checked marks whether any member's
+// DetectDir is detected on disk. Input order is preserved across groups;
+// within a group, members keep the order they appeared in the input slice.
+func makeAgents(agents []agent.Agent, global bool) []agentRow {
 	detected := make(map[agent.AgentType]bool)
 	for _, d := range agent.Detect() {
 		detected[d.Type] = true
 	}
 
-	// Bucket agents by (skills dir, agents dir) while preserving the
-	// input order across groups for deterministic rendering.
+	// Bucket agents by (skills dir, agents dir) for the active scope while
+	// preserving the input order across groups for deterministic rendering.
 	groups := make(map[string][]agent.Agent)
 	order := make([]string, 0, len(agents))
 	for _, a := range agents {
-		key := a.ProjectSkillsDir + "\x00" + a.ProjectAgentsDir
+		key := agentGroupKey(a, global)
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
 		}
@@ -218,6 +224,40 @@ func makeAgents(agents []agent.Agent) []agentRow {
 		})
 	}
 	return rows
+}
+
+func agentGroupKey(a agent.Agent, global bool) string {
+	if global && (a.UserSkillsDir != "" || a.UserAgentsDir != "") {
+		return a.UserSkillsDir + "\x00" + a.UserAgentsDir
+	}
+	return a.ProjectSkillsDir + "\x00" + a.ProjectAgentsDir
+}
+
+// regroupAgents rebuilds m.agents for the current m.global scope while
+// preserving which agent types were checked prior to the scope switch.
+func (m *Model) regroupAgents() {
+	checked := make(map[agent.AgentType]bool)
+	for _, row := range m.agents {
+		if row.checked {
+			for _, a := range row.agents {
+				checked[a.Type] = true
+			}
+		}
+	}
+	rows := makeAgents(m.rawAgents, m.global)
+	for i := range rows {
+		rowChecked := false
+		for _, a := range rows[i].agents {
+			if checked[a.Type] {
+				rowChecked = true
+				break
+			}
+		}
+		rows[i].checked = rowChecked
+	}
+	m.agents = rows
+	m.agentCursor = 0
+	m.agentOffset = 0
 }
 
 // rebuildVisible walks the catalog honoring both fold state and the
@@ -513,8 +553,7 @@ func (m Model) Selection() agent.Selection {
 // initial default for the level phase — the user can change it there via
 // Space, and the final choice comes back on Selection().Global.
 func Run(cat *plugin.Catalog, agents []agent.Agent, global bool) (agent.Selection, error) {
-	m := NewModel(cat, agents)
-	m.global = global
+	m := newModelWithScope(cat, agents, global)
 	p := tea.NewProgram(m)
 	final, err := p.Run()
 	if err != nil {

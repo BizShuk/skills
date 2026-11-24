@@ -144,7 +144,7 @@ func TestDetect_FindsExistingAgent(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "expected Detect() to include claude-code when $HOME/.claude exists")
-}// mkSubagentFile creates a single .md file at <base>/<name>.md with simple
+} // mkSubagentFile creates a single .md file at <base>/<name>.md with simple
 // content, returning the absolute path to the .md file. Mirrors mkSkillDir
 // but for flat subagent files (not directories).
 func mkSubagentFile(t *testing.T, base, name string) string {
@@ -229,4 +229,64 @@ func TestApply_SkillAndSubagentTogether(t *testing.T) {
 	saDest := filepath.Join(cwd, ".claude", "agents", "reviewer.md")
 	_, err = os.Stat(saDest)
 	assert.NoError(t, err, "expected reviewer.md at %s", saDest)
+}
+
+// TestCanonicalRoot_ResolvesSymlinksAndMissingLeaf confirms canonicalRoot
+// collapses symlink aliases onto the real directory both when the leaf exists
+// and when only an ancestor exists on disk.
+func TestCanonicalRoot_ResolvesSymlinksAndMissingLeaf(t *testing.T) {
+	base := t.TempDir()
+	realDir := filepath.Join(base, "real", "skills")
+	require.NoError(t, os.MkdirAll(realDir, 0o755))
+
+	linkBase := filepath.Join(base, "alias")
+	require.NoError(t, os.Symlink(filepath.Join(base, "real"), linkBase))
+
+	wantExisting, err := filepath.EvalSymlinks(realDir)
+	require.NoError(t, err)
+
+	// Existing target via symlinked parent.
+	assert.Equal(t, wantExisting, canonicalRoot(filepath.Join(linkBase, "skills")))
+
+	// Non-existent nested leaf under symlinked parent still matches real path.
+	assert.Equal(t,
+		filepath.Join(wantExisting, "nested", "leaf"),
+		canonicalRoot(filepath.Join(linkBase, "skills", "nested", "leaf")),
+	)
+}
+
+// TestApply_DeduplicatesSharedAndSymlinkedRoots verifies that when multiple
+// selected agents resolve to the same skills/agents root (either directly via
+// shared UserSkillsDir or via a symlink), Apply skips duplicate writes.
+func TestApply_DeduplicatesSharedAndSymlinkedRoots(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	// Point ~/.claude/skills -> ~/.agents/skills so codex, antigravity, and
+	// claude-code all resolve to the same canonical skills root.
+	sharedSkills := filepath.Join(homeDir, ".agents", "skills")
+	require.NoError(t, os.MkdirAll(sharedSkills, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755))
+	require.NoError(t, os.Symlink(sharedSkills, filepath.Join(homeDir, ".claude", "skills")))
+
+	src := t.TempDir()
+	skillSrc := mkSkillDir(t, src, "helper")
+
+	sel := Selection{
+		SkillPaths: []string{skillSrc},
+		AgentTypes: []AgentType{"antigravity", "antigravity-cli", "codex", "claude-code"},
+		Global:     true,
+	}
+	require.NoError(t, Apply(sel))
+
+	dest := filepath.Join(sharedSkills, "helper", "SKILL.md")
+	_, err := os.Stat(dest)
+	assert.NoError(t, err, "expected SKILL.md at %s", dest)
+
+	// Confirm separate ~/.gemini/antigravity/skills and ~/.gemini/antigravity-cli/skills
+	// were not created because their UserSkillsDir is ~/.agents/skills.
+	_, err = os.Stat(filepath.Join(homeDir, ".gemini", "antigravity", "skills"))
+	assert.True(t, os.IsNotExist(err))
+	_, err = os.Stat(filepath.Join(homeDir, ".gemini", "antigravity-cli", "skills"))
+	assert.True(t, os.IsNotExist(err))
 }

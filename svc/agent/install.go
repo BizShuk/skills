@@ -51,41 +51,38 @@ func Apply(sel Selection) error {
 		byType[a.Type] = a
 	}
 
+	seenSkills := make(map[string]bool)
+	seenAgents := make(map[string]bool)
+
 	for _, t := range sel.AgentTypes {
 		a, ok := byType[t]
 		if !ok {
 			continue
 		}
 
-		// Skills: copy to SkillsDir.
+		// Skills: copy to SkillsDir, skipping duplicate resolved destinations.
 		skillsRoot := a.ProjectSkillsDir
 		if sel.Global {
 			skillsRoot = a.UserSkillsDir
 		}
-		if skillsRoot != "" {
-			if !sel.Global && !filepath.IsAbs(skillsRoot) {
-				skillsRoot = filepath.Join(cwd, skillsRoot)
-			}
+		if root, ok := resolveUniqueRoot(skillsRoot, sel.Global, cwd, seenSkills); ok {
 			for _, src := range sel.SkillPaths {
 				name := filepath.Base(src)
-				dst := filepath.Join(skillsRoot, name)
+				dst := filepath.Join(root, name)
 				if err := utils.CopyTree(src, dst); err != nil {
 					return fmt.Errorf("install: copy skill %s -> %s: %w", src, dst, err)
 				}
 			}
 		}
 
-		// Subagents: copy .md files to AgentsDir.
+		// Subagents: copy .md files to AgentsDir, skipping duplicate resolved destinations.
 		agentsRoot := a.ProjectAgentsDir
 		if sel.Global {
 			agentsRoot = a.UserAgentsDir
 		}
-		if agentsRoot != "" {
-			if !sel.Global && !filepath.IsAbs(agentsRoot) {
-				agentsRoot = filepath.Join(cwd, agentsRoot)
-			}
+		if root, ok := resolveUniqueRoot(agentsRoot, sel.Global, cwd, seenAgents); ok {
 			for _, src := range sel.SubagentPaths {
-				dst := filepath.Join(agentsRoot, filepath.Base(src))
+				dst := filepath.Join(root, filepath.Base(src))
 				if err := utils.CopyTree(src, dst); err != nil {
 					return fmt.Errorf("install: copy subagent %s -> %s: %w", src, dst, err)
 				}
@@ -95,3 +92,48 @@ func Apply(sel Selection) error {
 	return nil
 }
 
+// resolveUniqueRoot anchors relative project paths under cwd, resolves symlinks
+// via canonicalRoot, and returns false if that canonical destination was already
+// processed in seen.
+func resolveUniqueRoot(root string, global bool, cwd string, seen map[string]bool) (string, bool) {
+	if root == "" {
+		return "", false
+	}
+	if !global && !filepath.IsAbs(root) {
+		root = filepath.Join(cwd, root)
+	}
+	canon := canonicalRoot(root)
+	if seen[canon] {
+		return "", false
+	}
+	seen[canon] = true
+	return root, true
+}
+
+// canonicalRoot resolves symlinks on dir (or its deepest existing ancestor when
+// dir has not been created yet) so shared paths and symlink aliases collapse to
+// the same deduplication key.
+func canonicalRoot(dir string) string {
+	clean := filepath.Clean(dir)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return resolved
+	}
+	var tail []string
+	cur := clean
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return clean
+		}
+		tail = append(tail, filepath.Base(cur))
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			parts := make([]string, 0, len(tail)+1)
+			parts = append(parts, resolved)
+			for i := len(tail) - 1; i >= 0; i-- {
+				parts = append(parts, tail[i])
+			}
+			return filepath.Join(parts...)
+		}
+		cur = parent
+	}
+}

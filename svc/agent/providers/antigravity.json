@@ -2,7 +2,7 @@
   "type": "antigravity",
   "displayName": "Antigravity",
   "projectSkillsDir": ".agents/skills",
-  "userSkillsDir": "~/.gemini/antigravity/skills",
+  "userSkillsDir": "~/.agents/skills",
   "projectAgentsDir": ".agents/agents",
   "userAgentsDir": "~/.gemini/antigravity/agents",
   "detectDir": "~/.gemini/antigravity",

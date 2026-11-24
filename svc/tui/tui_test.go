@@ -508,10 +508,10 @@ func TestCursorStaysVisible(t *testing.T) {
 func twoAgents() []agent.Agent {
 	return []agent.Agent{
 		{Type: "claude-code", DisplayName: "Claude Code",
-			DetectDir: "/home/user/.claude",
+			DetectDir:        "/home/user/.claude",
 			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents"},
 		{Type: "codex", DisplayName: "Codex",
-			DetectDir: "",
+			DetectDir:        "",
 			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
 	}
 }
@@ -542,7 +542,7 @@ func TestEnterAdvancesThroughAllThreePhases(t *testing.T) {
 // it returns to the skills phase, without quitting or losing state.
 func TestEscStepsBackThroughPhases(t *testing.T) {
 	m := NewModel(sampleCatalog(), twoAgents())
-	m1 := mustModel(t, sendKey(m, tea.KeyEnter)) // -> phaseAgents
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))  // -> phaseAgents
 	m2 := mustModel(t, sendKey(m1, tea.KeyEnter)) // -> phaseLevel
 	require.Equal(t, phaseLevel, m2.phase)
 
@@ -649,7 +649,7 @@ func TestMakeAgentsSkipsUndetectedDefaultAgent(t *testing.T) {
 	rows := makeAgents([]agent.Agent{
 		{Type: "claude-code", DisplayName: "Claude Code"},
 		{Type: "antigravity", DisplayName: "Antigravity"},
-	})
+	}, true)
 
 	for _, r := range rows {
 		assert.False(t, r.checked, "%s should start unchecked: default type but folder not detected", r.agents[0].Type)
@@ -666,7 +666,7 @@ func TestMakeAgentsChecksAnyDetectedAgent(t *testing.T) {
 
 	rows := makeAgents([]agent.Agent{
 		{Type: "codex", DisplayName: "Codex"},
-	})
+	}, true)
 
 	require.Len(t, rows, 1)
 	assert.True(t, rows[0].detected, "codex folder exists, so it should be marked detected")
@@ -674,35 +674,72 @@ func TestMakeAgentsChecksAnyDetectedAgent(t *testing.T) {
 }
 
 // TestMakeAgentsGroupsByInstallPath verifies the agent-row grouping
-// policy: four agents sharing (ProjectSkillsDir, ProjectAgentsDir) collapse
-// into a single row, while an agent with a distinct install path stays
-// in its own row. Groups preserve input order so the rendered list is
-// deterministic.
+// policy across scopes: in project mode, agents sharing (ProjectSkillsDir,
+// ProjectAgentsDir) collapse into one row; in global mode, grouping uses
+// (UserSkillsDir, UserAgentsDir) so agents with distinct global dirs stay
+// separate.
 func TestMakeAgentsGroupsByInstallPath(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // no folders detected
 
-	rows := makeAgents([]agent.Agent{
+	input := []agent.Agent{
 		{Type: "antigravity", DisplayName: "Antigravity",
-			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents",
+			UserSkillsDir: "~/.agents/skills", UserAgentsDir: "~/.gemini/antigravity/agents"},
 		{Type: "antigravity-cli", DisplayName: "Antigravity CLI",
-			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents",
+			UserSkillsDir: "~/.agents/skills", UserAgentsDir: "~/.gemini/antigravity-cli/agents"},
 		{Type: "codex", DisplayName: "Codex",
-			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents",
+			UserSkillsDir: "~/.agents/skills", UserAgentsDir: "~/.agents/agents"},
 		{Type: "opencode", DisplayName: "OpenCode",
-			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents"},
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents",
+			UserSkillsDir: "~/.config/opencode/skills", UserAgentsDir: "~/.config/opencode/agents"},
 		{Type: "claude-code", DisplayName: "Claude Code",
-			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents"},
+			ProjectSkillsDir: ".claude/skills", ProjectAgentsDir: ".claude/agents",
+			UserSkillsDir: "~/.claude/skills", UserAgentsDir: "~/.claude/agents"},
+	}
+
+	projRows := makeAgents(input, false)
+	require.Len(t, projRows, 2, "project mode: four .agents/skills agents + claude-code = two rows")
+	require.Len(t, projRows[0].agents, 4, "first row bundles four .agents/skills agents")
+	require.Len(t, projRows[1].agents, 1, "second row holds claude-code alone")
+	assert.Equal(t, agent.AgentType("antigravity"), projRows[0].agents[0].Type)
+	assert.Equal(t, agent.AgentType("antigravity-cli"), projRows[0].agents[1].Type)
+	assert.Equal(t, agent.AgentType("codex"), projRows[0].agents[2].Type)
+	assert.Equal(t, agent.AgentType("opencode"), projRows[0].agents[3].Type)
+
+	globalRows := makeAgents(input, true)
+	require.Len(t, globalRows, 5, "global mode: distinct UserSkillsDir/UserAgentsDir keep all five separate")
+}
+
+// TestLevelPhaseRegroupsAgentsOnScopeChange verifies that toggling between
+// Project and Global in phaseLevel re-groups m.agents for the new scope while
+// preserving checked agent types.
+func TestLevelPhaseRegroupsAgentsOnScopeChange(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
+	t.Setenv("HOME", home)
+
+	m := NewModel(sampleCatalog(), []agent.Agent{
+		{Type: "codex", DisplayName: "Codex",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents",
+			UserSkillsDir: "~/.agents/skills", UserAgentsDir: "~/.agents/agents"},
+		{Type: "opencode", DisplayName: "OpenCode",
+			ProjectSkillsDir: ".agents/skills", ProjectAgentsDir: ".agents/agents",
+			UserSkillsDir: "~/.config/opencode/skills", UserAgentsDir: "~/.config/opencode/agents"},
 	})
+	require.Len(t, m.agents, 2, "starts in global mode with two separate rows")
+	require.True(t, m.agents[0].checked, "codex detected and checked")
+	require.False(t, m.agents[1].checked, "opencode undetected and unchecked")
 
-	require.Len(t, rows, 2, "four .agents/skills agents + claude-code = two rows")
-	require.Len(t, rows[0].agents, 4, "first row bundles four .agents/skills agents")
-	require.Len(t, rows[1].agents, 1, "second row holds claude-code alone")
+	m1 := mustModel(t, sendKey(m, tea.KeyEnter))  // -> phaseAgents
+	m2 := mustModel(t, sendKey(m1, tea.KeyEnter)) // -> phaseLevel (levelCursor=1)
+	m3 := mustModel(t, sendKey(m2, tea.KeyUp))    // highlight Project (levelCursor=0)
+	m4 := mustModel(t, sendKey(m3, tea.KeySpace)) // switch to Project
 
-	// Member order within the group matches the input order.
-	assert.Equal(t, agent.AgentType("antigravity"), rows[0].agents[0].Type)
-	assert.Equal(t, agent.AgentType("antigravity-cli"), rows[0].agents[1].Type)
-	assert.Equal(t, agent.AgentType("codex"), rows[0].agents[2].Type)
-	assert.Equal(t, agent.AgentType("opencode"), rows[0].agents[3].Type)
+	assert.False(t, m4.global)
+	require.Len(t, m4.agents, 1, "switching to Project merges codex + opencode into one .agents/skills row")
+	assert.True(t, m4.agents[0].checked, "merged row stays checked because codex was checked")
 }
 
 // TestAgentRowDisplayNameSingleton confirms a single-agent row renders as
@@ -951,8 +988,6 @@ func TestCascadeUnfold_LocalAndRemoteRootsSymmetric(t *testing.T) {
 	assert.Contains(t, viewRemote, "remote-plugin-skill")
 }
 
-
-
 // subagentCatalog is a fixture with one skill and one subagent.
 func subagentCatalog() *plugin.Catalog {
 	return &plugin.Catalog{
@@ -998,8 +1033,8 @@ func TestSubagentSelectionSpaceOnRow(t *testing.T) {
 	expanded := mustModel(t, sendKey(m, tea.KeyRight))
 	// Cursor 0 = header, cursor 1 = skill writer, cursor 2 = subagent reviewer
 	// Move cursor to row 2 (subagent reviewer)
-	m2 := mustModel(t, sendKey(expanded, tea.KeyDown))  // row 1: skill
-	m3 := mustModel(t, sendKey(m2, tea.KeyDown)) // row 2: subagent
+	m2 := mustModel(t, sendKey(expanded, tea.KeyDown)) // row 1: skill
+	m3 := mustModel(t, sendKey(m2, tea.KeyDown))       // row 2: subagent
 	require.Equal(t, 2, m3.cursor)
 	// Space on subagent row
 	m4 := mustModel(t, sendKey(m3, tea.KeySpace))

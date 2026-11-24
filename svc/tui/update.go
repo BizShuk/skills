@@ -97,7 +97,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.levelCursor++
 			}
 		case tea.KeySpace:
-			m.global = m.levelCursor == 1
+			next := m.levelCursor == 1
+			if next != m.global {
+				m.global = next
+				m.regroupAgents()
+			}
 		}
 		return m, nil
 	}
