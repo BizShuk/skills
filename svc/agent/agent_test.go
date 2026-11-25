@@ -32,14 +32,18 @@ func TestProviderFieldsRoundTripViaJSON(t *testing.T) {
 		t.Run(string(p.Type), func(t *testing.T) {
 			// each provider must have non-empty project + user dirs
 			assert.NotEmpty(t, p.Type)
-			assert.NotEmpty(t, p.ProjectSkillsDir, "ProjectSkillsDir empty for %s", p.Type)
-			assert.NotEmpty(t, p.UserSkillsDir, "UserSkillsDir empty for %s", p.Type)
+			// hermes-agent reads skills from ~/.agents/skills via skills.external_dirs,
+			// so it declares no skills dir of its own.
+			if p.Type != "hermes-agent" {
+				assert.NotEmpty(t, p.ProjectSkillsDir, "ProjectSkillsDir empty for %s", p.Type)
+				assert.NotEmpty(t, p.UserSkillsDir, "UserSkillsDir empty for %s", p.Type)
+				assert.True(t, strings.HasPrefix(p.UserSkillsDir, "~/"), "UserSkillsDir not ~/: %s", p.UserSkillsDir)
+			}
 			assert.NotEmpty(t, p.ProjectAgentsDir, "ProjectAgentsDir empty for %s", p.Type)
 			assert.NotEmpty(t, p.UserAgentsDir, "UserAgentsDir empty for %s", p.Type)
 			assert.NotEmpty(t, p.DetectDir, "DetectDir empty for %s", p.Type)
 			assert.NotNil(t, p.SessionDirs, "SessionDirs nil for %s", p.Type)
 			// user-side paths must start with "~/" (the agent package expands at use time)
-			assert.True(t, strings.HasPrefix(p.UserSkillsDir, "~/"), "UserSkillsDir not ~/: %s", p.UserSkillsDir)
 			assert.True(t, strings.HasPrefix(p.UserAgentsDir, "~/"), "UserAgentsDir not ~/: %s", p.UserAgentsDir)
 			assert.True(t, strings.HasPrefix(p.DetectDir, "~/"), "DetectDir not ~/: %s", p.DetectDir)
 		})
@@ -124,8 +128,10 @@ func TestProviderJSONFilesAreValid(t *testing.T) {
 			var raw map[string]any
 			require.NoError(t, json.Unmarshal(data, &raw))
 			assert.Contains(t, raw, "type")
-			assert.Contains(t, raw, "projectSkillsDir")
-			assert.Contains(t, raw, "userSkillsDir")
+			if raw["type"] != "hermes-agent" {
+				assert.Contains(t, raw, "projectSkillsDir")
+				assert.Contains(t, raw, "userSkillsDir")
+			}
 			assert.Contains(t, raw, "projectAgentsDir")
 			assert.Contains(t, raw, "userAgentsDir")
 			assert.Contains(t, raw, "detectDir")

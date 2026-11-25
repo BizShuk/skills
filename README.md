@@ -91,7 +91,7 @@ project-scoped path 或外部 metadata index 前不顯示。缺少 metadata sour
 | `antigravity-cli` | `.agents/skills` | `~/.agents/skills` | `.agents/agents` | `~/.gemini/antigravity-cli/agents` | `~/.gemini/antigravity-cli` 目錄存在 |
 | `codex` | `.agents/skills` | `~/.agents/skills` | `.agents/agents` | `~/.agents/agents` | `~/.codex` 目錄存在 |
 | `opencode` | `.agents/skills` | `~/.config/opencode/skills` | `.agents/agents` | `~/.config/opencode/agents` | `~/.config/opencode` 目錄存在 |
-| `hermes-agent` | `.hermes/skills` | `~/.hermes/skills` | `.hermes/agents` | `~/.hermes/agents` | `~/.hermes` 目錄存在 |
+| `hermes-agent` | (無, 經 `skills.external_dirs` 讀 `~/.agents/skills`) | (無) | `.hermes/agents` | `~/.hermes/agents` | `~/.hermes` 目錄存在 |
 | `grok` | `.grok/skills` | `~/.grok/skills` | `.grok/agents` | `~/.grok/agents` | `~/.grok` 目錄存在 |
 | `pi` | `.pi/skills` | `~/.pi/skills` | `.pi/agents` | `~/.pi/agents` | `~/.pi` 目錄存在 |
 
