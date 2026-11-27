@@ -14,10 +14,11 @@ import (
 // Run loads the installs file and re-installs every tracked entry by
 // re-discovering skills from the original source and applying them to the
 // recorded agents. Project-level entries whose projectPath no longer exists
-// on disk are removed from the file and reported as errors. Project-level
-// skills and subagents the source no longer offers are deleted from the
-// project. Each result is printed immediately so the user sees progress
-// per-project.
+// on disk are removed from the file and reported as errors. Skills and
+// subagents the source no longer offers are dropped from the records only;
+// their copies on disk are left untouched, since install dirs such as
+// .agents/skills are shared with skills installed by other means. Each
+// result is printed immediately so the user sees progress per-project.
 func Run(args []string) error {
 	f, err := Load()
 	if err != nil {
@@ -29,9 +30,8 @@ func Run(args []string) error {
 		return nil
 	}
 
-	tracked := f.Entries // snapshot: names every entry tracked before this run
 	var keep []Entry
-	for i, e := range f.Entries {
+	for _, e := range f.Entries {
 		e := e
 		if e.Scope == ScopeProject {
 			if _, err := os.Stat(e.ProjectPath); os.IsNotExist(err) {
@@ -47,10 +47,10 @@ func Run(args []string) error {
 			continue
 		}
 
+		for _, n := range append(gone.Skills, gone.Subagents...) {
+			fmt.Printf("[UNTRACKED] %s (no longer offered by %s; kept on disk)\n", n, e.Source)
+		}
 		if e.Scope == ScopeProject {
-			if err := pruneProject(e, gone, tracked, i); err != nil {
-				fmt.Printf("[ERROR] %s: prune: %v\n", e.ProjectPath, err)
-			}
 			fmt.Printf("[OK] updated skills for %s\n", e.ProjectPath)
 		} else {
 			fmt.Printf("[OK] updated global skills from %s\n", e.Source)
@@ -147,48 +147,6 @@ func updateEntry(e *Entry) (stale, error) {
 	e.Skills, gone.Skills = split(e.Skills, foundSkills)
 	e.Subagents, gone.Subagents = split(e.Subagents, foundSubagents)
 	return gone, nil
-}
-
-// pruneProject deletes the stale names of project entry e from its project
-// dirs. A name another entry of the same project still tracks is kept,
-// since agents can share a project dir (e.g. .agents/skills).
-func pruneProject(e Entry, gone stale, tracked []Entry, self int) error {
-	shared := map[string]bool{}
-	for i, o := range tracked {
-		if i == self || o.Scope != ScopeProject || o.ProjectPath != e.ProjectPath {
-			continue
-		}
-		for _, n := range o.Skills {
-			shared["skill:"+n] = true
-		}
-		for _, n := range o.Subagents {
-			shared["subagent:"+n] = true
-		}
-	}
-	var skills, subagents []string
-	for _, n := range gone.Skills {
-		if !shared["skill:"+n] {
-			skills = append(skills, n)
-		}
-	}
-	for _, n := range gone.Subagents {
-		if !shared["subagent:"+n] {
-			subagents = append(subagents, n)
-		}
-	}
-	if len(skills) == 0 && len(subagents) == 0 {
-		return nil
-	}
-
-	var types []agent.AgentType
-	for _, n := range e.Agents {
-		types = append(types, agent.AgentType(n))
-	}
-	removed, err := agent.Remove(agent.ProjectRemoveSelection(e.ProjectPath, types, skills, subagents))
-	for _, n := range append(removed.ProjectSkills, removed.ProjectSubagents...) {
-		fmt.Printf("[REMOVED] %s: %s (no longer offered by %s)\n", e.ProjectPath, n, e.Source)
-	}
-	return err
 }
 
 func toSet(names []string) map[string]bool {

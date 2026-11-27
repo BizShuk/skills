@@ -41,9 +41,9 @@ func installed(project, skill string) bool {
 	return err == nil
 }
 
-// TestRun_PrunesSkillDroppedBySource: a skill the source stops offering is
-// deleted from the project and from the entry; the rest stay installed.
-func TestRun_PrunesSkillDroppedBySource(t *testing.T) {
+// TestRun_UntracksSkillDroppedBySource: a skill the source stops offering is
+// dropped from the entry but its copy stays on disk.
+func TestRun_UntracksSkillDroppedBySource(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	project := t.TempDir()
 	src := mkSource(t, "keep", "drop")
@@ -57,33 +57,10 @@ func TestRun_PrunesSkillDroppedBySource(t *testing.T) {
 	require.NoError(t, Run(nil))
 
 	assert.True(t, installed(project, "keep"))
-	assert.False(t, installed(project, "drop"), "skill no longer offered must be deleted from the project")
+	assert.True(t, installed(project, "drop"), "update must only touch records, never delete from disk")
 	f, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, []string{"keep"}, f.Entries[0].Skills)
-}
-
-// TestRun_KeepsDroppedSkillTrackedByOtherEntry: when another entry of the
-// same project still tracks the name, the shared copy stays on disk.
-func TestRun_KeepsDroppedSkillTrackedByOtherEntry(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	project := t.TempDir()
-	srcA := mkSource(t, "shared")
-	srcB := mkSource(t, "shared")
-	require.NoError(t, Save(&InstallsFile{Version: 1, Entries: []Entry{
-		projectEntry(srcA, project, "shared"),
-		projectEntry(srcB, project, "shared"),
-	}}))
-	require.NoError(t, Run(nil))
-
-	require.NoError(t, os.RemoveAll(filepath.Join(srcA, "p/skills/shared")))
-	require.NoError(t, Run(nil))
-
-	assert.True(t, installed(project, "shared"), "name tracked by another entry must survive")
-	f, err := Load()
-	require.NoError(t, err)
-	assert.Empty(t, f.Entries[0].Skills)
-	assert.Equal(t, []string{"shared"}, f.Entries[1].Skills)
 }
 
 // TestRun_LeavesUntrackedProjectSkills: skills in the project dir that no
